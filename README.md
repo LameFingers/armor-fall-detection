@@ -16,20 +16,20 @@ personal motion data to the cloud.
 
 ## Proposed solution
 
-Armor will use a BMI270 motion sensor and an ESP32-S3 microcontroller to
-analyze motion data directly on the wearable device. When a possible fall is
-detected, Armor will alert the wearer with a buzzer, LED, or vibration and allow
+Armor will use a BMI160 motion sensor and a LilyGO LoRa32 (TTGO) development
+board to analyze motion data directly on the wearable device. When a possible
+fall is detected, Armor will alert the wearer with a buzzer and LED and allow
 time to cancel a false alarm. If there is no response, the device will send an
-emergency message over LoRa to a receiving gateway.
+emergency message over LoRa to a second LilyGO LoRa32 base station.
 
 ## Planned system components
 
-- ESP32-S3 microcontroller
-- BMI270 accelerometer and gyroscope
+- LilyGO LoRa32 915 MHz development board (ESP32, SX1276/SX1278, OLED, SD, BLE, Wi-Fi)
+- HiLetgo BMI160 six-axis IMU (accelerometer and gyroscope)
 - TinyML model trained with labeled motion data
 - Buzzer and LED for local wearer alerts
-- LoRa transmitter and receiving gateway
-- Rechargeable battery and 3D-printed enclosure
+- Second LilyGO LoRa32 board acting as base station / receiver
+- Rechargeable 3.7 V LiPo battery and 3D-printed enclosure
 - Python-based data collection, processing, and testing tools
 
 ## Project status

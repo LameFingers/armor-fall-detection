@@ -5,7 +5,7 @@ Armor's on-device fall detection.
 
 ## Planned workflow
 
-1. Collect labeled BMI270 accelerometer and gyroscope data.
+1. Collect labeled BMI160 accelerometer and gyroscope data.
 2. Record normal activities and controlled fall-like events.
 3. Clean, segment, and label the sensor data.
 4. Establish a conventional threshold-based baseline detector.
@@ -16,14 +16,20 @@ Armor's on-device fall detection.
 
 ## Potential input features
 
-- Three-axis acceleration
-- Three-axis gyroscope data
+- Three-axis acceleration (BMI160 accel, ±2 g to ±16 g range)
+- Three-axis gyroscope data (BMI160 gyro, ±125 °/s to ±2000 °/s range)
 - Acceleration magnitude
 - Gyroscope magnitude
 - Jerk or rapid change in acceleration
 - Orientation change
 - Short-window motion energy
 - Post-event inactivity
+
+## Target deployment platform
+
+- Board: LilyGO LoRa32 915 MHz (ESP32, 240 MHz dual-core, ~320 KB RAM)
+- Inference must complete well within the 20 ms sampling interval at 50 Hz
+- Exported model format: Edge Impulse Arduino library (`.zip`) or raw C array
 
 ## Data privacy
 
@@ -33,4 +39,4 @@ data-format examples for reproducibility.
 
 ## Current status
 
-Dataset collection and model training have not started.
+Dataset collection and model training have not started. Parts have been ordered.
