@@ -1,42 +1,62 @@
-# Armor Machine Learning
+# ARMOR Machine Learning
 
-This folder will document the data and model-development workflow used for
-Armor's on-device fall detection.
+This folder is reserved for the ARMOR machine-learning development workflow.
+No trained models or placeholder model files exist yet — this folder will be
+populated as the project progresses through data collection and model
+development.
+
+---
 
 ## Planned workflow
 
-1. Collect labeled BMI160 accelerometer and gyroscope data.
-2. Record normal activities and controlled fall-like events.
-3. Clean, segment, and label the sensor data.
-4. Establish a conventional threshold-based baseline detector.
-5. Train and evaluate TinyML models using Edge Impulse.
-6. Compare models using fall detection, false alarms, latency, memory use, and
-   expected power consumption.
-7. Export the selected model for deployment on the ESP32-S3.
+This folder will contain work across the following stages:
 
-## Potential input features
+| Stage                    | Description                                                              |
+|--------------------------|--------------------------------------------------------------------------|
+| Data organization        | References and scripts for managing raw and processed sensor data        |
+| Data cleaning            | Scripts to remove corrupt samples, fill gaps, and align timestamps       |
+| Feature engineering      | Code to compute windowed features from raw BMI160 data                   |
+| Model training           | Training scripts or Edge Impulse project references                      |
+| Model evaluation         | Evaluation notebooks, confusion matrices, and metric summaries           |
+| TinyML deployment        | Instructions and scripts for deploying an exported model to the ESP32    |
 
-- Three-axis acceleration (BMI160 accel, ±2 g to ±16 g range)
-- Three-axis gyroscope data (BMI160 gyro, ±125 °/s to ±2000 °/s range)
+---
+
+## Data to be collected
+
+Labeled IMU data will be recorded from the BMI160 on the sender board during
+controlled test sessions and will be stored in [`evidence/`](../evidence/).
+
+Target labels:
+- Normal activities (walking, standing, sitting, tool use, arm movements)
+- Controlled fall-like events (simulated drops and sharp movements on soft surfaces)
+
+---
+
+## Candidate input features
+
+- Three-axis accelerometer (BMI160, ±2 g to ±16 g)
+- Three-axis gyroscope (BMI160, ±125 °/s to ±2000 °/s)
 - Acceleration magnitude
 - Gyroscope magnitude
-- Jerk or rapid change in acceleration
+- Jerk (rate of change of acceleration)
 - Orientation change
 - Short-window motion energy
-- Post-event inactivity
+- Post-event inactivity window
 
-## Target deployment platform
+---
 
-- Board: LilyGO LoRa32 915 MHz (ESP32, 240 MHz dual-core, ~320 KB RAM)
-- Inference must complete well within the 20 ms sampling interval at 50 Hz
-- Exported model format: Edge Impulse Arduino library (`.zip`) or raw C array
+## Target deployment
 
-## Data privacy
+- **Board:** LILYGO T3 V1.6.1 (ESP32, 240 MHz dual-core, ~320 KB RAM)
+- **Inference requirement:** must complete within the sensor sampling interval
+- **Exported model format:** Edge Impulse Arduino library (`.zip`) or raw
+  C array for direct inclusion in the `.ino` sketch
 
-Raw data will not be published if it contains identifying or sensitive
-information. The repository may include small, anonymized sample datasets or
-data-format examples for reproducibility.
+---
 
 ## Current status
 
-Dataset collection and model training have not started. Parts have been ordered.
+Dataset collection and model training have not started.  The current prototype
+uses the baseline acceleration-magnitude threshold detector described in
+[`docs/baseline-motion-detection.md`](../docs/baseline-motion-detection.md).

@@ -18,7 +18,7 @@ All IBM Bob suggestions are reviewed, adapted, and tested before use.
 
 ## Entry 001 — Hardware specification correction and documentation update
 
-**Date:** 2025
+**Date:** 2026
 **Objective:** Correct all project documentation to reflect the actual hardware
 on hand and align the repository with the real bill of materials before any
 firmware or ML work begins.
@@ -61,4 +61,67 @@ hardware arrives.
 - Updated `firmware/README.md`
 - Updated `hardware/README.md`
 - Updated `ml/README.md`
+- This log entry (`docs/bob-development-log.md`)
+
+---
+
+## Entry 002 — Working firmware, wiring documentation, and baseline motion detection
+
+**Date:** July 15, 2026
+**Objective:** Add physically tested sender and receiver firmware to the
+repository and create a full set of supporting documentation covering
+hardware wiring, firmware setup, motion detection methodology, and
+structured test logging.
+
+**Prompt given to Bob:**
+> Provided two physically tested Arduino sketches — sender (LILYGO T3 V1.6.1 +
+> DFRobot Gravity BMI160 + RGB LED + KY-006 + LoRa) and receiver (LILYGO T3
+> V1.6.1 + RGB LED + KY-006 + LoRa). Bob was instructed to create the two
+> `.ino` files with comments only (no executable changes), create seven
+> documentation and README files, and add a `## Current Working Prototype`
+> section to `README.md` without removing any existing content.
+
+**Bob's contribution:**
+Bob created both firmware files with engineering comments added throughout,
+and authored all requested documentation files:
+
+| File | Action | Description |
+|------|--------|-------------|
+| `firmware/sender_bmi160_lora_alert/sender_bmi160_lora_alert.ino` | Created | Sender firmware with comments; 492 lines |
+| `firmware/receiver_lora_alert/receiver_lora_alert.ino` | Created | Receiver firmware with comments; 399 lines |
+| `docs/hardware-wiring.md` | Created | GPIO pin assignments, I²C addresses, RGB LED, KY-006, and power wiring for both boards |
+| `docs/firmware-setup.md` | Created | Arduino IDE board selection, required libraries, upload steps, LoRa parameter matching, and troubleshooting |
+| `docs/baseline-motion-detection.md` | Created | Explains the threshold approach, gravity-at-rest baseline, calibration guidance, known limitations, and future ML improvements |
+| `docs/testing-log-template.md` | Created | Markdown table template for recording controlled test sessions with RSSI, SNR, false positives, and missed events |
+| `evidence/README.md` | Updated | Replaced planning stub with guidelines on what to store, what to exclude, and file naming conventions |
+| `hardware/README.md` | Updated | Replaced planning BOM with accurate v1 working prototype components; added future hardware work section |
+| `ml/README.md` | Updated | Replaced planning stub; clarified folder is reserved for future data and model work; linked to baseline detection doc |
+| `README.md` | Updated | Added `## Current Working Prototype` section with description, firmware table, and key documentation links |
+
+Comments in both `.ino` files cover: project purpose and board role, library
+purposes, internal SX1276 pin mapping (do-not-rewire notice), OLED I²C
+address, BMI160 shared bus and address, common-anode RGB LED logic, KY-006
+differential-drive wiring, configuration constants, normal and alert states,
+LoRa packet format, acceleration magnitude calculation, gravity-at-rest
+explanation, alert cooldown, RSSI and SNR definitions, return-to-listening
+state, and the `setup()` initialization rationale.  Comments explicitly note
+that a single acceleration threshold may cause false positives and that the
+system is not a validated fall detector.
+
+**Project owner decision:**
+Firmware files and documentation accepted pending review of VS Code diff.
+Threshold calibration, controlled testing, and data collection are the next
+development priorities.
+
+**Artifacts produced:**
+- Created `firmware/sender_bmi160_lora_alert/sender_bmi160_lora_alert.ino`
+- Created `firmware/receiver_lora_alert/receiver_lora_alert.ino`
+- Created `docs/hardware-wiring.md`
+- Created `docs/firmware-setup.md`
+- Created `docs/baseline-motion-detection.md`
+- Created `docs/testing-log-template.md`
+- Updated `evidence/README.md`
+- Updated `hardware/README.md`
+- Updated `ml/README.md`
+- Updated `README.md`
 - This log entry (`docs/bob-development-log.md`)
