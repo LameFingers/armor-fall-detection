@@ -50,15 +50,21 @@ end-to-end.
   shows normal monitoring status through a green RGB LED.
 - The sender performs a **baseline fast-motion threshold test**: when total
   acceleration magnitude exceeds `MOTION_THRESHOLD_G` (1.2 g default) and the
-  alert cooldown has elapsed, an alert fires.
-- On alert the sender LED turns red, the KY-006 passive buzzer sounds, and a
-  `FALL_ALERT` LoRa packet is broadcast.
+  alert cooldown has elapsed, the sender enters a **5-second cancellation
+  countdown**.
+- During the countdown the sender LED turns red and the OLED shows the seconds
+  remaining.  Pressing the **GPIO 2 cancel button** suppresses the alert —
+  no LoRa packet is sent.
+- If the countdown expires without a button press, the sender increments the
+  alert counter, transmits a `FALL_ALERT` LoRa packet, and sounds the buzzer.
+- The sender OLED also shows estimated **LiPo battery voltage and percentage**.
 - The **receiver** (LILYGO T3 V1.6.1) listens continuously for `FALL_ALERT`
   packets.
-- On receipt the receiver shows the alert, RSSI, and SNR on its OLED, turns
-  its LED red, and sounds its KY-006 buzzer.
-- Both boards return to their normal green/listening state after approximately
-  two seconds.
+- On receipt the receiver turns its LED red, sounds a **repeating buzzer
+  alarm**, and shows the alert number, RSSI, and SNR on its OLED.  The alarm
+  continues until the **GPIO 2 acknowledge button** is pressed.
+- After acknowledgement the receiver LED returns to green and the OLED returns
+  to `LISTENING`.
 
 ### Firmware
 

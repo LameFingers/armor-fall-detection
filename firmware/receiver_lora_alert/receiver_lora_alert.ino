@@ -2,28 +2,35 @@
  * ============================================================
  * ARMOR — Edge-AI Wearable Fall-Detection & LoRa Emergency Alert
  * Firmware role: RECEIVER (base-station / alert unit)
- * Board: LILYGO T3 V1.6.1 (ESP32 + built-in SX1276 LoRa + built-in SSD1306 OLED)
+ * Board: LILYGO T3 V1.6.1 (ESP32 + SX1276 LoRa + SSD1306 OLED)
  *
- * What this firmware does:
- *   - Keeps the SX1276 LoRa radio in continuous receive mode.
- *   - When a "FALL_ALERT,..." packet arrives from the sender, it:
- *       - Turns the LED red.
- *       - Sounds the KY-006 passive buzzer alarm.
- *       - Displays the alert, packet RSSI, and SNR on the OLED.
- *       - Waits two seconds, then returns LED to green and OLED to
- *         "LISTENING" state, ready for the next packet.
- *   - Packets that do not start with "FALL_ALERT," are logged to
- *     Serial Monitor and ignored.
- *   - RSSI (Received Signal Strength Indicator, dBm) and SNR
- *     (Signal-to-Noise Ratio, dB) are read from the SX1276 after each
- *     packet and displayed on screen, providing a useful measure of
- *     link quality during range testing.
+ * Behavior:
+ *   - Continuously listens for FALL_ALERT LoRa packets.
+ *   - When any valid FALL_ALERT packet arrives:
+ *       * LED turns red.
+ *       * OLED displays alert number, RSSI, and SNR.
+ *       * Buzzer repeats until GPIO 2 button is pressed.
+ *   - While the alarm is active, any additional FALL_ALERT packet:
+ *       * Updates the OLED information.
+ *       * Keeps the LED red and buzzer repeating.
+ *   - GPIO 2 button:
+ *       * Acknowledges the receiver alarm.
+ *       * Stops buzzer.
+ *       * Turns LED green.
+ *       * Returns OLED to LISTENING.
  *
- * This firmware has no BMI160 dependency — motion sensing is handled
- * entirely on the sender board.
+ * Acknowledge-button wiring:
+ *   GPIO 2 ---- normally-open pushbutton ---- GND
  *
- * This firmware is a working baseline prototype. It has been physically
- * tested but is NOT medically certified or safety-certified in any way.
+ * INPUT_PULLUP behavior:
+ *   Not pressed = HIGH
+ *   Pressed     = LOW
+ *
+ * ESP32 Arduino Core 3.x compatible:
+ *   Uses ledcAttach(), ledcWriteTone(), and ledcWrite() with the
+ *   GPIO pin directly rather than ledcSetup()/ledcAttachPin().
+ *
+ * This is a prototype, not a medical/safety-certified device.
  * ============================================================
  */
 
@@ -41,9 +48,8 @@
 // =================================================
 // LILYGO T3 V1.6.1 INTERNAL SX1276 LORA PINS
 //
-// The SX1276 radio is wired internally on the T3 V1.6.1 PCB.
-// These GPIO pins are occupied by the radio hardware and must NOT
-// be used for any external peripheral.
+// These are hardwired on the T3 V1.6.1 PCB. Do not connect any external
+// peripheral to these GPIOs.
 // =================================================
 #define LORA_SCK   5
 #define LORA_MISO  19
@@ -52,16 +58,14 @@
 #define LORA_RST   23
 #define LORA_DIO0  26
 
-// MUST match the sender's LoRa band.
-// Use 915E6 for 915 MHz modules, 868E6 for 868 MHz modules.
+// Operating frequency — must match the sender exactly.
+// 915E6 = 915 MHz (Australia, North America). Change to 868E6 for EU modules.
 #define LORA_BAND  915E6
 
 // =================================================
 // BUILT-IN OLED
-// Your board diagram shows SDA = GPIO21 and SCL = GPIO22.
 //
-// The SSD1306 OLED panel on the T3 V1.6.1 is connected internally to
-// the ESP32's default I2C bus.
+// SSD1306 128×64 panel connected internally on the T3 V1.6.1.
 // GPIO21 = SDA, GPIO22 = SCL, I2C address = 0x3C.
 // =================================================
 #define OLED_SDA   21
@@ -70,70 +74,150 @@
 #define SCREEN_W   128
 #define SCREEN_H   64
 
-// Construct the display object. The -1 reset argument means no dedicated
-// hardware reset pin — the OLED resets via software.
+// -1 reset argument: no dedicated hardware reset pin; uses software reset.
 Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);
 
 // =================================================
 // EXTERNAL COMMON-ANODE RGB LED
 //
-// Common/long LED leg -> 3.3V
-// Red cathode         -> GPIO14 through 220-330 ohm resistor
-// Green cathode       -> GPIO25 through 220-330 ohm resistor
-// Blue cathode        -> GPIO4 through 220-330 ohm resistor
-//
-// Common-anode behavior:
-// LOW  = color ON
-// HIGH = color OFF
-//
-// A common-anode RGB LED has its shared anode connected to 3.3V.
-// Each color cathode connects through a 220–330 ohm current-limiting
-// resistor to the GPIO pin below.  Pulling a GPIO LOW forward-biases
-// that color's diode (ON); HIGH turns it OFF.
+// Common anode (long leg) -> 3.3V.
+// Each cathode connects through a 220–330 Ω resistor to its GPIO pin.
+// LOW = color ON (anode higher than cathode); HIGH = color OFF.
 // =================================================
 #define LED_RED    14
 #define LED_GREEN  25
 #define LED_BLUE   4
 
 // =================================================
-// KY-006 PASSIVE BUZZER: TWO-GPIO DIFFERENTIAL DRIVE
+// KY-006 PASSIVE BUZZER — SINGLE-PIN PWM DRIVE
 //
-// KY-006 S pin -> GPIO12
-// KY-006 - pin -> GPIO13
-// KY-006 + pin -> leave unconnected
+// Previous version used a differential two-GPIO drive (both BUZZER_A and
+// BUZZER_B toggled opposite). This version uses ESP32 hardware PWM (LEDC)
+// on BUZZER_A (GPIO 12) for a clean square wave. BUZZER_B (GPIO 13) is
+// held permanently LOW as the piezo return path.
 //
-// Do NOT connect either of these two buzzer pins to GND.
-//
-// This project drives the passive piezo from two GPIO pins with
-// opposite output levels (differential drive) to maximize the voltage
-// swing across the piezo membrane at 3.3V supply.  Neither of the two
-// buzzer terminals in this configuration goes directly to GND.
+// Wiring:
+//   KY-006 S / piezo terminal -> GPIO 12  (PWM output)
+//   KY-006 - / piezo terminal -> GPIO 13  (held LOW)
+//   KY-006 + pin -> unconnected
 // =================================================
 #define BUZZER_A   12
 #define BUZZER_B   13
 
-// Running count of FALL_ALERT packets received in the current session.
+// =================================================
+// ACKNOWLEDGE BUTTON
+//
+// Wiring: GPIO 2 ---- normally-open pushbutton ---- GND
+// Configured INPUT_PULLUP: unpressed = HIGH, pressed = LOW.
+// Pressing the button during an active alarm silences it and
+// returns the receiver to the LISTENING state.
+// =================================================
+#define ACK_BUTTON_PIN  2
+
+// Minimum time (ms) a button state must be stable before it is accepted.
+// Prevents false triggers from contact bounce.
+const unsigned long BUTTON_DEBOUNCE_MS = 50;
+
+// =================================================
+// REPEATING ALARM PATTERN
+//
+// The alarm cycles: tone 1 → tone 2 → silence → repeat.
+// Using non-blocking millis() timing so LoRa packets can still be
+// received and processed while the alarm is sounding.
+// =================================================
+const uint16_t ALARM_TONE_1_HZ = 1900;
+const uint16_t ALARM_TONE_2_HZ = 2300;
+
+const unsigned long ALARM_TONE_1_MS = 180;
+const unsigned long ALARM_TONE_2_MS = 180;
+const unsigned long ALARM_SILENCE_MS = 400;
+
+// 8-bit PWM resolution: duty cycle 128 / 255 ≈ 50% square wave.
+const int BUZZER_PWM_RESOLUTION = 8;
+
+// =================================================
+// Runtime state
+// =================================================
+
+// True when a FALL_ALERT has been received and not yet acknowledged.
+bool alarmActive = false;
+
+// Counts all received packets (any type) and validated FALL_ALERT packets.
+uint32_t receivedPacketCount = 0;
 uint32_t receivedAlertCount = 0;
 
-// ---------- RGB LED functions ----------
+// Stores the most recently received FALL_ALERT data for OLED display.
+String latestMessage = "";
+int latestAlertNumber = -1;
+float latestMagnitude = 0.0;
+int latestRssi = 0;
+float latestSnr = 0.0;
 
-// Normal (green) state: receiver is listening, no alert active.
+// Button debounce state variables.
+bool lastRawButtonReading = HIGH;
+bool stableButtonState = HIGH;
+unsigned long lastDebounceTime = 0;
+
+// =================================================
+// Buzzer state — non-blocking alarm sequencer
+//
+// The alarm cycles through three phases without using delay().
+// This keeps loop() responsive to incoming LoRa packets and button presses
+// while the alarm is running.
+// =================================================
+enum AlarmTonePhase {
+  ALARM_TONE_1,
+  ALARM_TONE_2,
+  ALARM_SILENCE
+};
+
+AlarmTonePhase alarmTonePhase = ALARM_TONE_1;
+unsigned long alarmPhaseStartTime = 0;
+
+// =================================================
+// LED functions
+// =================================================
+
+// Normal state: receiver is listening, no active alarm.
 void ledGreen() {
   digitalWrite(LED_RED, HIGH);
   digitalWrite(LED_GREEN, LOW);
   digitalWrite(LED_BLUE, HIGH);
 }
 
-// Alert (red) state: a FALL_ALERT packet has been received.
+// Alert state: a FALL_ALERT packet has been received and is unacknowledged.
 void ledRed() {
   digitalWrite(LED_RED, LOW);
   digitalWrite(LED_GREEN, HIGH);
   digitalWrite(LED_BLUE, HIGH);
 }
 
-// ---------- OLED functions ----------
+// =================================================
+// Buzzer functions
+//
+// Uses the ESP32 Arduino Core 3.x LEDC API: ledcAttach(), ledcWriteTone(),
+// and ledcWrite() take the GPIO pin number directly (no separate channel
+// setup required). The channel is allocated internally by the driver.
+// =================================================
 
-// Normal listening screen shown during idle state and after each alert clears.
+// Start a continuous tone at the given frequency using hardware PWM.
+void buzzerStart(uint16_t frequencyHz) {
+  ledcWriteTone(BUZZER_A, frequencyHz);
+  // 128 / 255 ≈ 50% duty cycle for maximum piezo excitation.
+  ledcWrite(BUZZER_A, 128);
+}
+
+// Stop the buzzer by zeroing the duty cycle, then the frequency.
+void buzzerStop() {
+  ledcWrite(BUZZER_A, 0);
+  ledcWriteTone(BUZZER_A, 0);
+}
+
+// =================================================
+// OLED functions
+// =================================================
+
+// Idle screen: shown at startup and after each alarm is acknowledged.
 void showListening() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
@@ -143,20 +227,21 @@ void showListening() {
   display.println("RECEIVER");
 
   display.setTextSize(1);
-  display.setCursor(0, 24);
+  display.setCursor(0, 23);
   display.println("Status: LISTENING");
   display.println("LED: GREEN");
   display.print("Alerts RX: ");
   display.println(receivedAlertCount);
+  display.print("Packets RX: ");
+  display.println(receivedPacketCount);
 
   display.display();
 }
 
-// Alert screen shown while the receiver is responding to a FALL_ALERT packet.
-// Displays the raw packet string, RSSI (dBm), and SNR (dB) for link diagnostics.
-// RSSI: higher (less negative) values indicate a stronger signal.
-// SNR:  values above 0 dB mean signal is stronger than the noise floor.
-void showFallAlert(const String &message, int rssi, float snr) {
+// Active alarm screen: shows alert number, RSSI, SNR, and ACK prompt.
+// RSSI (dBm): less negative = stronger signal.
+// SNR (dB): positive = signal above noise floor.
+void showActiveAlert() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
@@ -165,23 +250,44 @@ void showFallAlert(const String &message, int rssi, float snr) {
   display.println("FALL ALERT");
 
   display.setTextSize(1);
-  display.setCursor(0, 23);
-  display.println("SIGNAL RECEIVED");
-  display.print("RSSI: ");
-  display.print(rssi);
-  display.println(" dBm");
-
-  display.print("SNR: ");
-  display.print(snr, 1);
-  display.println(" dB");
+  display.setCursor(0, 18);
+  display.println("ALARM ACTIVE");
 
   display.print("Alert #: ");
+  display.println(latestAlertNumber);
+
+  display.print("RSSI: ");
+  display.print(latestRssi);
+  display.print(" SNR:");
+  display.println(latestSnr, 1);
+
+  display.print("Alerts RX: ");
   display.println(receivedAlertCount);
+
+  // Bottom-row prompt reminds the operator which button to press.
+  display.setCursor(0, 56);
+  display.println("Press GPIO2 ACK");
 
   display.display();
 }
 
-// Error screen shown if LoRa initialization fails during setup().
+// Brief confirmation screen shown for ~800 ms after the button is pressed.
+void showAcknowledged() {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.println("ACKNOWLEDGED");
+
+  display.setTextSize(1);
+  display.setCursor(0, 28);
+  display.println("Alarm silenced");
+  display.println("Returning to listen...");
+  display.display();
+}
+
+// Error screen shown when LoRa initialization fails in setup().
 void showLoRaError() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
@@ -199,104 +305,266 @@ void showLoRaError() {
   display.display();
 }
 
-// ---------- Buzzer functions ----------
+// =================================================
+// Packet parsing
+//
+// Sender packet format:
+//   FALL_ALERT,<alertNumber>,MAG=<magnitude>
+//
+// Example:
+//   FALL_ALERT,7,MAG=2.31
+// =================================================
 
-// Both buzzer pins are driven oppositely to increase voltage across
-// the passive piezo element.
-// Produces a square wave of the requested frequency for durationMs by
-// toggling both pins together with opposite polarity.
-void differentialTone(uint16_t frequencyHz, uint16_t durationMs) {
-  unsigned long halfPeriodUs = 500000UL / frequencyHz;
-  unsigned long startTime = millis();
+// Extracts the sequential alert number from the packet string.
+// Returns -1 if the format is unrecognised.
+int parseAlertNumber(const String &message) {
+  const String prefix = "FALL_ALERT,";
 
-  while (millis() - startTime < durationMs) {
-    digitalWrite(BUZZER_A, HIGH);
-    digitalWrite(BUZZER_B, LOW);
-    delayMicroseconds(halfPeriodUs);
+  if (!message.startsWith(prefix)) {
+    return -1;
+  }
 
-    digitalWrite(BUZZER_A, LOW);
-    digitalWrite(BUZZER_B, HIGH);
-    delayMicroseconds(halfPeriodUs);
+  int secondCommaIndex = message.indexOf(',', prefix.length());
+
+  if (secondCommaIndex == -1) {
+    return -1;
+  }
+
+  String alertNumberText =
+      message.substring(prefix.length(), secondCommaIndex);
+
+  return alertNumberText.toInt();
+}
+
+// Extracts the acceleration magnitude (in g) from the "MAG=" field.
+// Returns 0.0 if the field is not found.
+float parseMagnitude(const String &message) {
+  int magnitudeIndex = message.indexOf("MAG=");
+
+  if (magnitudeIndex == -1) {
+    return 0.0;
+  }
+
+  String magnitudeText = message.substring(magnitudeIndex + 4);
+  return magnitudeText.toFloat();
+}
+
+// =================================================
+// Alarm control
+// =================================================
+
+// Activates the repeating alarm: sets the alarm flag, starts the first
+// tone phase, turns LED red, and begins the buzzer.
+void startAlarm() {
+  alarmActive = true;
+
+  alarmTonePhase = ALARM_TONE_1;
+  alarmPhaseStartTime = millis();
+
+  ledRed();
+  buzzerStart(ALARM_TONE_1_HZ);
+}
+
+// Deactivates the alarm: clears the flag, stops the buzzer, returns LED green.
+void stopAlarm() {
+  alarmActive = false;
+
+  buzzerStop();
+  ledGreen();
+
+  Serial.println(">>> Alarm acknowledged locally.");
+}
+
+// Called every loop() iteration. Advances the buzzer through its
+// tone1 → tone2 → silence → repeat cycle using non-blocking timing.
+// Does nothing if no alarm is currently active.
+void updateAlarmBuzzer() {
+  if (!alarmActive) {
+    return;
+  }
+
+  unsigned long now = millis();
+  unsigned long phaseElapsed = now - alarmPhaseStartTime;
+
+  switch (alarmTonePhase) {
+    case ALARM_TONE_1:
+      if (phaseElapsed >= ALARM_TONE_1_MS) {
+        alarmTonePhase = ALARM_TONE_2;
+        alarmPhaseStartTime = now;
+        buzzerStart(ALARM_TONE_2_HZ);
+      }
+      break;
+
+    case ALARM_TONE_2:
+      if (phaseElapsed >= ALARM_TONE_2_MS) {
+        alarmTonePhase = ALARM_SILENCE;
+        alarmPhaseStartTime = now;
+        buzzerStop();
+      }
+      break;
+
+    case ALARM_SILENCE:
+      if (phaseElapsed >= ALARM_SILENCE_MS) {
+        alarmTonePhase = ALARM_TONE_1;
+        alarmPhaseStartTime = now;
+        buzzerStart(ALARM_TONE_1_HZ);
+      }
+      break;
   }
 }
 
-// Alert tone: six short alternating tones for a noticeable alarm.
-void loudReceiverAlarm() {
-  // Six short alternating tones for a noticeable alert.
-  for (int i = 0; i < 3; i++) {
-    differentialTone(1900, 180);
-    differentialTone(2300, 180);
+// Returns true exactly once for each stable HIGH-to-LOW transition on
+// ACK_BUTTON_PIN (i.e. each physical button press after debounce).
+// Must be called every loop() iteration to track edge transitions correctly.
+bool acknowledgeButtonPressed() {
+  bool rawButtonReading = digitalRead(ACK_BUTTON_PIN);
+
+  // Reset the debounce timer whenever the raw reading changes.
+  if (rawButtonReading != lastRawButtonReading) {
+    lastDebounceTime = millis();
   }
 
-  // Equal voltage on both buzzer wires = silent.
-  // Setting both pins LOW removes the differential drive, silencing the piezo.
-  digitalWrite(BUZZER_A, LOW);
-  digitalWrite(BUZZER_B, LOW);
+  bool buttonPressed = false;
+
+  if (millis() - lastDebounceTime >= BUTTON_DEBOUNCE_MS) {
+    if (rawButtonReading != stableButtonState) {
+      stableButtonState = rawButtonReading;
+
+      // INPUT_PULLUP: LOW = pressed.
+      if (stableButtonState == LOW) {
+        buttonPressed = true;
+      }
+    }
+  }
+
+  lastRawButtonReading = rawButtonReading;
+  return buttonPressed;
 }
 
-// ---------- Fall alert handling ----------
+// =================================================
+// Valid fall-alert handling
+// =================================================
 
-// Full alert response sequence:
-//   Increment counter → turn LED red → update OLED with RSSI/SNR →
-//   sound buzzer → wait 2 s → return LED to green and OLED to listening.
-// After delay(2000) the receiver is silent and ready for the next packet.
-void receivedFallAlert(const String &message, int rssi, float snr) {
+// Called when a packet starting with "FALL_ALERT," is received.
+// Parses the alert number and magnitude, increments the alert counter,
+// and either starts a new alarm or refreshes the OLED if already active.
+// A single acceleration threshold may cause false positives;
+// this system is not a validated fall detector.
+void handleFallAlert(const String &message, int rssi, float snr) {
+  int receivedAlertNumber = parseAlertNumber(message);
+
+  if (receivedAlertNumber < 0) {
+    Serial.println("Ignored: malformed FALL_ALERT packet.");
+    return;
+  }
+
+  latestMessage = message;
+  latestAlertNumber = receivedAlertNumber;
+  latestMagnitude = parseMagnitude(message);
+  latestRssi = rssi;
+  latestSnr = snr;
+
+  // Every valid FALL_ALERT increases the received alert count.
   receivedAlertCount++;
 
-  // Immediately show visible alarm.
-  ledRed();
-  showFallAlert(message, rssi, snr);
+  Serial.print(">>> FALL_ALERT #");
+  Serial.print(latestAlertNumber);
+  Serial.println(" received.");
 
-  // Sound buzzer.
-  loudReceiverAlarm();
+  // Only initialize the repeating buzzer sequence on the first packet
+  // that activates an alarm. Additional alerts just refresh the OLED.
+  if (!alarmActive) {
+    startAlarm();
+  } else {
+    // Alarm is already running; keep the LED red and refresh the display
+    // with the updated alert number, RSSI, and SNR.
+    ledRed();
+  }
 
-  // Keep red on for a full visible two seconds.
-  delay(2000);
-
-  // Return receiver to its normal ready state.
-  // The OLED returns to the LISTENING screen and the LED returns to green,
-  // indicating the receiver is back in continuous packet-listening mode.
-  ledGreen();
-  showListening();
+  showActiveAlert();
 }
 
-// ---------- Setup ----------
+// =================================================
+// LoRa receive processing
+// =================================================
 
-/*
- * setup() — runs once at power-on or reset.
- *
- * Initializes all hardware in dependency order:
- *   1. GPIO pins (LED, buzzer) — no bus required.
- *   2. I2C bus — needed by OLED.
- *   3. OLED — provides status feedback for remaining setup steps.
- *   4. SPI bus and LoRa radio — must be ready before loop() can receive.
- *
- * If OLED or LoRa initialization fails the firmware halts and shows an
- * error so the problem can be diagnosed before deployment.
- */
+// Non-blocking LoRa poll. Reads one complete packet per call if available.
+// Increments the packet counter for all received packets regardless of type.
+// Only FALL_ALERT packets trigger the alarm; all others are logged and ignored.
+void checkLoRaPackets() {
+  int packetSize = LoRa.parsePacket();
 
+  if (packetSize == 0) {
+    return;
+  }
+
+  String message = "";
+
+  while (LoRa.available()) {
+    message += (char)LoRa.read();
+  }
+
+  int rssi = LoRa.packetRssi();
+  float snr = LoRa.packetSnr();
+
+  receivedPacketCount++;
+
+  Serial.print("Received: ");
+  Serial.print(message);
+  Serial.print(" | RSSI: ");
+  Serial.print(rssi);
+  Serial.print(" dBm | SNR: ");
+  Serial.print(snr, 1);
+  Serial.println(" dB");
+
+  if (message.startsWith("FALL_ALERT,")) {
+    handleFallAlert(message, rssi, snr);
+  } else {
+    Serial.println("Ignored: packet is not a FALL_ALERT.");
+  }
+}
+
+// =================================================
+// setup() — runs once at power-on or reset
+//
+// Initialization order:
+//   1. GPIO (LED, button, buzzer) — no bus required.
+//   2. LEDC PWM channel attached to BUZZER_A.
+//   3. I2C bus, then OLED.
+//   4. SPI bus, then LoRa radio.
+//
+// Halts with an error screen if OLED or LoRa init fails so the fault
+// can be identified before deployment.
+// =================================================
 void setup() {
   Serial.begin(115200);
   delay(500);
 
-  // RGB LED setup — start in green (listening) state.
+  // RGB LED — start green (listening / ready).
   pinMode(LED_RED, OUTPUT);
   pinMode(LED_GREEN, OUTPUT);
   pinMode(LED_BLUE, OUTPUT);
   ledGreen();
 
-  // Buzzer setup — start with both pins LOW (piezo silent).
-  pinMode(BUZZER_A, OUTPUT);
+  // Acknowledge button — pulled HIGH internally; button pulls to GND.
+  pinMode(ACK_BUTTON_PIN, INPUT_PULLUP);
+
+  // Buzzer — GPIO13 stays LOW as the piezo return path.
+  // GPIO12 carries the LEDC PWM waveform.
   pinMode(BUZZER_B, OUTPUT);
-  digitalWrite(BUZZER_A, LOW);
   digitalWrite(BUZZER_B, LOW);
 
-  // OLED setup — initialize I2C bus then start the display.
+  // Attach LEDC to BUZZER_A using the ESP32 Arduino Core 3.x API.
+  // No explicit channel number needed — the driver allocates it internally.
+  ledcAttach(BUZZER_A, ALARM_TONE_1_HZ, BUZZER_PWM_RESOLUTION);
+  buzzerStop();
+
+  // OLED — initialize I2C then start the display.
   Wire.begin(OLED_SDA, OLED_SCL);
 
-  // Halts if OLED is not found. Verify GPIO21/22 wiring and I2C address 0x3C.
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println("OLED initialization failed.");
+
     while (true) {
       delay(1000);
     }
@@ -310,12 +578,10 @@ void setup() {
   display.println("Starting receiver...");
   display.display();
 
-  // LoRa setup — configure SPI pins then initialize the radio.
+  // LoRa — configure SPI pins then initialize the radio.
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_SS);
   LoRa.setPins(LORA_SS, LORA_RST, LORA_DIO0);
 
-  // Halts if LoRa radio is not found. Ensure the antenna is attached and
-  // LORA_BAND matches the sender and the physical module frequency.
   if (!LoRa.begin(LORA_BAND)) {
     Serial.println("LoRa initialization failed.");
     showLoRaError();
@@ -325,75 +591,45 @@ void setup() {
     }
   }
 
-  // Radio parameters — must match sender parameters exactly for packets to
-  // be received: spreading factor, bandwidth, and coding rate must all agree.
-  // Must match sender parameters.
+  // Radio parameters — must match sender exactly for packets to be decoded.
+  // Must match sender settings exactly.
   LoRa.setSpreadingFactor(7);
   LoRa.setSignalBandwidth(125E3);
   LoRa.setCodingRate4(5);
 
   Serial.println("Receiver ready.");
-  Serial.println("Waiting for FALL_ALERT packets.");
+  Serial.println("GPIO2 acknowledges an active FALL_ALERT alarm.");
 
-  // Show the initial listening screen; receiver is now in continuous RX mode.
+  // Radio is now in continuous receive mode. showListening() reflects this.
   showListening();
 }
 
-// ---------- Main loop ----------
-
-/*
- * loop() — runs continuously after setup().
- *
- * LoRa.parsePacket() is non-blocking: it returns 0 when no complete packet
- * has arrived, allowing the loop to run at full speed without blocking.
- * When a packet arrives, its bytes are read, RSSI and SNR are sampled from
- * the SX1276 registers, the content is checked, and a FALL_ALERT is handled
- * if the prefix matches.  Any other packet is logged and discarded.
- * After handling the alert the receiver re-enters this loop and
- * LoRa.parsePacket() automatically resumes listening — no explicit
- * mode change is required.
- */
-
+// =================================================
+// loop() — runs continuously after setup()
+//
+// Three tasks run every iteration:
+//   1. checkLoRaPackets() — non-blocking poll for new LoRa packets.
+//   2. updateAlarmBuzzer() — advances the buzzer phase state machine.
+//   3. Button check — silences the alarm when GPIO 2 is pressed.
+//
+// None of these use delay(), so the loop remains responsive to all three
+// inputs simultaneously during an active alarm.
+// =================================================
 void loop() {
-  // Non-blocking check for a received LoRa packet.
-  // Returns the packet length in bytes, or 0 if nothing has arrived.
-  int packetSize = LoRa.parsePacket();
+  // This runs during both normal listening and an active alarm.
+  checkLoRaPackets();
 
-  // No packet available — return immediately to keep polling.
-  if (packetSize == 0) {
-    return;
-  }
+  // Drives the repeated buzzer sequence without delay().
+  updateAlarmBuzzer();
 
-  // Read all available bytes into a String.
-  String message = "";
+  // Acknowledge only works during an active alarm.
+  if (alarmActive && acknowledgeButtonPressed()) {
+    stopAlarm();
+    showAcknowledged();
 
-  while (LoRa.available()) {
-    message += (char)LoRa.read();
-  }
+    // Brief confirmation pause before returning to listening screen.
+    delay(800);
 
-  // RSSI: Received Signal Strength Indicator in dBm.
-  // More negative = weaker signal; values above about -100 dBm are usable.
-  int rssi = LoRa.packetRssi();
-  // SNR: Signal-to-Noise Ratio in dB from the SX1276.
-  // Positive SNR = signal above noise floor; negative = signal below noise.
-  float snr = LoRa.packetSnr();
-
-  Serial.print("Received: ");
-  Serial.print(message);
-
-  Serial.print(" | RSSI: ");
-  Serial.print(rssi);
-  Serial.print(" dBm");
-
-  Serial.print(" | SNR: ");
-  Serial.print(snr, 1);
-  Serial.println(" dB");
-
-  // Sender sends: FALL_ALERT,<number>,MAG=<acceleration>
-  // Filter for valid FALL_ALERT packets; ignore everything else.
-  if (message.startsWith("FALL_ALERT,")) {
-    receivedFallAlert(message, rssi, snr);
-  } else {
-    Serial.println("Ignored: packet is not a FALL_ALERT.");
+    showListening();
   }
 }

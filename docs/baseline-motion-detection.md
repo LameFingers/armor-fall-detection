@@ -19,9 +19,19 @@ calculates the total magnitude:
 magnitude = sqrt(ax² + ay² + az²)
 ```
 
-When `magnitude >= MOTION_THRESHOLD_G` and the alert cooldown has elapsed,
-the firmware treats the event as a potential fall and transmits a `FALL_ALERT`
-LoRa packet.
+When `magnitude >= MOTION_THRESHOLD_G` and the alert cooldown has elapsed, the
+firmware enters a **5-second cancellation window**:
+
+- The OLED shows a countdown and prompts the wearer to press the cancel button.
+- If the **GPIO 2 button is pressed** within 5 seconds, no LoRa packet is sent
+  and the device returns to monitoring.
+- If the countdown **expires without a button press**, the firmware increments
+  the alert counter, transmits a `FALL_ALERT` LoRa packet, and sounds the
+  buzzer.
+
+The cancellation window is the primary false-positive mitigation in the current
+prototype.  It allows a worker who has fallen but is uninjured to suppress the
+alert themselves.
 
 ---
 
@@ -74,8 +84,8 @@ will generate false positives during normal arm movements and walking.
 - A single scalar threshold on acceleration magnitude is a very simple
   classifier.  Real falls produce characteristic acceleration patterns that
   this detector cannot distinguish from other sharp movements.
-- The system has no cancellation mechanism — the wearer cannot stop a false
-  alert after it is triggered.
+- The cancellation window requires the wearer to be conscious and physically
+  capable of pressing the button within 5 seconds.
 - LoRa range and reliability have not been field-tested.
 - The prototype has not been evaluated for battery life, robustness, or
   wearability.

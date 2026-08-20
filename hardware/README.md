@@ -15,12 +15,14 @@ GPIO pin assignments and breadboard wiring instructions.
 | 2   | LILYGO T3 V1.6.1 LoRa board              | ESP32 + SX1276 + built-in SSD1306 OLED; one sender, one receiver |
 | 1   | DFRobot Gravity BMI160 / SEN0250          | 6-axis IMU (accelerometer + gyroscope); sender only           |
 | 2   | Common-anode RGB LED                      | One per board; indicator for monitoring and alert states      |
-| 2   | KY-006 passive buzzer module              | One per board; differential two-GPIO drive                    |
-| 6   | 220–330 Ω resistors                       | Two per board (three color channels each); current limiting for RGB LED |
+| 2   | KY-006 passive buzzer module              | One per board; sender uses differential drive, receiver uses LEDC PWM |
+| 6   | 220–330 Ω resistors                       | Three per board (one per RGB LED color channel)               |
+| 2   | Normally-open tactile push buttons        | One per board; GPIO 2 → button → GND; sender = cancel, receiver = acknowledge |
+| 1   | PKCELL LP503562 LiPo battery (3.7 V)     | Sender only; connects to T3 V1.6.1 JST battery connector      |
 | —   | Breadboards                               | One per board for first prototype assembly                    |
 | —   | Jumper wires                              | Male-to-male and male-to-female assortment                    |
 | 2   | Matching LoRa antennas                    | Must match board frequency (915 MHz); attach before powering on |
-| 2   | USB cables                                | For firmware upload and serial monitoring                     |
+| 2   | Micro-USB cables                          | For firmware upload and serial monitoring                     |
 
 > **Antenna note:** Both LoRa antennas must be attached before any firmware
 > is uploaded or power is applied.  Operating the SX1276 radio without an

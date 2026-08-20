@@ -125,3 +125,117 @@ development priorities.
 - Updated `ml/README.md`
 - Updated `README.md`
 - This log entry (`docs/bob-development-log.md`)
+
+---
+
+## Entry 003 — Button design consultation: sender cancel and receiver acknowledge
+
+**Date:** July 15, 2026
+**Objective:** Determine how many tactile buttons to add to the sender and
+receiver boards, and what each button should do.
+
+**Prompt given to Bob:**
+> I want to add a button to the sender so that if a fall is detected, the user
+> can press it to cancel the alert in case they fell but are well enough to get
+> medical attention themselves. I'm debating on only adding one button to the
+> receiver. How many buttons should I add to either board and why?
+
+**Bob's recommendation:**
+
+*Sender — 1 button ("I'm OK" / cancel):*
+One button with one function — cancel the alert. During the alert window the
+wearer presses it to suppress the LoRa transmission. More buttons add
+complexity that a person in distress may not be able to use. Recommended GPIO:
+**GPIO 0** (onboard BOOT button on the T3 V1.6.1, no extra wiring required).
+
+*Receiver — 1 button (acknowledge / silence):*
+One button to silence the repeating alarm and confirm the alert has been seen.
+A second receiver button (e.g. send a LoRa ACK back to the sender) was
+identified as a valid future feature, but deferred until the sender firmware
+has a handler for incoming packets.
+
+**Button summary:**
+
+| Board    | Buttons | GPIO       | Function                                             |
+|----------|---------|------------|------------------------------------------------------|
+| Sender   | 1       | GPIO 0 (onboard BOOT — no extra wiring) | Cancel / "I'm OK" |
+| Receiver | 1       | GPIO 34 (or any free input GPIO) | Acknowledge / silence |
+
+**Project owner decision:**
+Design accepted. Button GPIO was changed to **GPIO 2** on both boards in the
+actual implementation (see Entry 004). No files were modified in this session.
+
+**Artifacts produced:**
+- This log entry (`docs/bob-development-log.md`)
+
+---
+
+## Entry 004 — Button implementation, receiver LEDC buzzer, and battery monitoring
+
+**Date:** July 19, 2026
+**Objective:** Update both firmware files to match physically tested code that
+adds cancel/acknowledge buttons, a non-blocking repeating receiver alarm, and
+LiPo battery voltage monitoring on the sender.
+
+**Prompt given to Bob:**
+> Provided two updated, physically tested Arduino sketches — sender with a
+> 5-second cancel countdown (GPIO 2 button), battery ADC monitoring (GPIO 35),
+> and updated OLED layout; receiver with a repeating non-blocking LEDC buzzer
+> alarm, GPIO 2 acknowledge button, per-packet parsing, and packet/alert
+> counters. Instructed to update firmware with comments only, then update all
+> appropriate repository files and add a development log entry.
+
+**Bob's contribution:**
+Bob replaced both firmware files (comments improved to match new behavior;
+executable code preserved exactly) and updated six other repository files:
+
+| File | Action | Description |
+|------|--------|-------------|
+| `firmware/sender_bmi160_lora_alert/sender_bmi160_lora_alert.ino` | Updated | 729 lines — cancel button, battery monitoring, countdown OLED screens |
+| `firmware/receiver_lora_alert/receiver_lora_alert.ino` | Updated | 635 lines — LEDC PWM buzzer, acknowledge button, non-blocking alarm sequencer, packet parser |
+| `docs/hardware-wiring.md` | Updated | Added cancel/acknowledge button wiring section; split buzzer section to document sender differential vs receiver LEDC drive; added battery ADC section (GPIO 35) |
+| `docs/firmware-setup.md` | Updated | Updated Verifying operation steps to reflect 5-second countdown and button interactions; expanded troubleshooting table with button and battery rows |
+| `docs/baseline-motion-detection.md` | Updated | Replaced "no cancellation mechanism" limitation with description of implemented cancel window; updated detection flow to describe the 5-second countdown |
+| `hardware/README.md` | Updated | Added buttons and LiPo battery to BOM; corrected USB to Micro-USB; corrected resistor count note |
+| `README.md` | Updated | Rewrote Current Working Prototype behavior bullets to describe cancel countdown, repeating receiver alarm, and acknowledge button |
+
+**Key behavioral changes documented:**
+
+*Sender:*
+- On threshold trigger, enters a 5-second OLED countdown rather than
+  immediately transmitting.
+- GPIO 2 (normally-open pushbutton → GND, INPUT_PULLUP) cancels the alert;
+  no LoRa packet is sent.
+- If countdown expires: alert number incremented, FALL_ALERT packet
+  transmitted, buzzer sounds, then returns to green/monitoring.
+- Cooldown timer starts at the beginning of the countdown window (not after
+  transmission) to prevent repeated countdowns from one sustained event.
+- GPIO 35 ADC reads battery voltage every 5 seconds; voltage-to-percentage
+  lookup table covers 3.30–4.20 V; OLED shows voltage, percentage, and
+  USB/battery power source.
+
+*Receiver:*
+- Buzzer is now driven by ESP32 hardware LEDC PWM on GPIO 12 (Core 3.x API:
+  `ledcAttach`, `ledcWriteTone`, `ledcWrite` with GPIO directly). GPIO 13
+  held permanently LOW as the piezo return path.
+- Alarm repeats in a non-blocking tone1 → tone2 → silence state machine
+  so LoRa packets continue to be received during an active alarm.
+- GPIO 2 acknowledge button (INPUT_PULLUP, debounced) stops the alarm and
+  returns the OLED to LISTENING.
+- Additional FALL_ALERT packets received during an active alarm refresh the
+  OLED with updated alert number, RSSI, and SNR without restarting the alarm.
+- `receivedPacketCount` and `receivedAlertCount` tracked separately.
+- Packet parser extracts alert number and magnitude from the packet string.
+
+**Project owner decision:**
+Firmware and documentation accepted pending review of VS Code diff.
+
+**Artifacts produced:**
+- Updated `firmware/sender_bmi160_lora_alert/sender_bmi160_lora_alert.ino`
+- Updated `firmware/receiver_lora_alert/receiver_lora_alert.ino`
+- Updated `docs/hardware-wiring.md`
+- Updated `docs/firmware-setup.md`
+- Updated `docs/baseline-motion-detection.md`
+- Updated `hardware/README.md`
+- Updated `README.md`
+- This log entry (`docs/bob-development-log.md`)

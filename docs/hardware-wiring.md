@@ -97,8 +97,9 @@ it OFF**.
 
 ## KY-006 passive buzzer — sender and receiver
 
-Both boards use a KY-006 passive buzzer module driven by **two GPIO pins in a
-differential arrangement**.
+Both boards use a KY-006 passive buzzer module.
+
+**Sender** uses a differential two-GPIO drive (both pins toggled opposite):
 
 | KY-006 pin | Connect to |
 |------------|------------|
@@ -106,14 +107,61 @@ differential arrangement**.
 | − (minus)  | GPIO 13    |
 | Middle +   | Unconnected |
 
-> This project drives the passive piezo from two GPIO pins with opposite
-> output levels.  GPIO 12 and GPIO 13 are always set to opposite states
-> (HIGH/LOW), so the full 3.3 V supply swing appears across the piezo
-> membrane, improving loudness at low supply voltage.
+> GPIO 12 and GPIO 13 are always driven to opposite states so the full 3.3 V
+> supply swing appears across the piezo, improving loudness at low voltage.
+> **Neither buzzer terminal goes directly to GND.**
 
-> **Neither of the two buzzer terminals in this configuration goes directly
-> to GND.**  Connecting either terminal to GND would defeat the differential
-> drive.
+**Receiver** uses single-pin hardware PWM (LEDC) on GPIO 12; GPIO 13 is held
+permanently LOW as the piezo return path:
+
+| KY-006 pin | Connect to              |
+|------------|-------------------------|
+| S (signal) | GPIO 12 (LEDC PWM output) |
+| − (minus)  | GPIO 13 (held LOW)      |
+| Middle +   | Unconnected             |
+
+> The receiver firmware generates a clean hardware square wave via the ESP32
+> LEDC peripheral rather than bit-banging, allowing the alarm to repeat
+> without blocking the LoRa receive or button-poll loop.
+> **Neither buzzer terminal goes directly to GND.**
+
+---
+
+## Cancel / acknowledge buttons
+
+Each board has one tactile button wired between a GPIO pin and GND.  The
+firmware configures each pin as `INPUT_PULLUP`; the GPIO reads HIGH at rest
+and LOW when the button is pressed.
+
+| Board    | GPIO | Function                                                         |
+|----------|------|------------------------------------------------------------------|
+| Sender   | 2    | Cancel / "I'm OK" — suppresses the alert during the 5-second countdown |
+| Receiver | 2    | Acknowledge — silences the repeating alarm after a FALL_ALERT is received |
+
+**Wiring (same for both boards):**
+
+```
+GPIO 2 ──── normally-open pushbutton ──── GND
+```
+
+> No external pull-up resistor is needed; the ESP32 internal pull-up is
+> enabled in firmware with `INPUT_PULLUP`.
+
+---
+
+## Battery monitoring (sender only)
+
+The T3 V1.6.1 has an onboard resistor voltage divider that connects the
+LiPo cell to **GPIO 35** (ADC1).  The sender firmware reads this pin to
+estimate battery voltage and state of charge.
+
+| Signal              | GPIO |
+|---------------------|------|
+| Battery ADC input   | 35   |
+
+> GPIO 35 is input-only on the ESP32 — do not drive it as an output.
+> The divider factor is initially estimated at 2.0 in firmware; calibrate
+> against a multimeter for accuracy.
 
 ---
 
