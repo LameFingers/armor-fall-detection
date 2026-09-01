@@ -35,19 +35,16 @@ GPIO pin assignments and breadboard wiring instructions.
 
 ## Future hardware work
 
-The following hardware improvements are planned for later development stages:
-
-| Area                     | Description                                                            |
-|--------------------------|------------------------------------------------------------------------|
-| Battery                  | 3.7 V LiPo cell and USB charging circuit for untethered operation      |
-| Charging circuit         | On-board or breakout TP4056/MCP73831 charging for the LiPo cell        |
-| Enclosure                | 3D-printed case for the wearable sender unit                           |
-| Custom PCB               | Purpose-designed PCB to replace breadboard wiring                     |
-| Field durability testing | Mechanical and environmental testing for outdoor remote worker use     |
+| Area | Description |
+|------|-------------|
+| Enclosure | 3D-printed case for the wearable sender unit |
+| Custom PCB | Purpose-designed PCB to replace breadboard wiring |
+| Field durability testing | Mechanical and environmental testing for outdoor remote worker use |
 
 ---
 
 ## Current status
 
-Both boards have been assembled on breadboards and the v1 firmware has been
-physically tested.  Wiring photographs are stored in [`evidence/`](../evidence/).
+Both boards are assembled on breadboards and the TinyML firmware has been
+physically tested end-to-end. Wiring photographs are stored in
+[`evidence/`](../evidence/).

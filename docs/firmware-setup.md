@@ -20,17 +20,19 @@ using the Arduino IDE.
 
 ## Required libraries
 
-Install all four libraries via **Sketch → Include Library → Manage Libraries**:
+Install via **Sketch → Include Library → Manage Libraries**:
 
-| Library name              | Author / Package            | Purpose                          |
-|---------------------------|-----------------------------|----------------------------------|
-| **LoRa**                  | Sandeep Mistry              | SX1276 LoRa packet radio driver  |
-| **Adafruit GFX Library**  | Adafruit                    | Graphics primitives for the OLED |
-| **Adafruit SSD1306**      | Adafruit                    | SSD1306 OLED display driver      |
-| **DFRobot_BMI160**        | DFRobot                     | BMI160 6-axis IMU driver         |
+| Library | Author | Purpose |
+|---------|--------|---------|
+| **LoRa** | Sandeep Mistry | SX1276 LoRa packet radio driver |
+| **Adafruit GFX Library** | Adafruit | Graphics primitives for the OLED |
+| **Adafruit SSD1306** | Adafruit | SSD1306 OLED display driver |
+| **DFRobot_BMI160** | DFRobot | BMI160 6-axis IMU driver (sender only) |
 
-> The DFRobot_BMI160 library is only required on the **sender** sketch, but
-> installing it on both machines simplifies the setup.
+The Edge Impulse library must be installed separately via
+**Sketch → Include Library → Add .ZIP Library** using the file at
+[`ml/armor-fall-detection-binary-v1.zip`](../ml/armor-fall-detection-binary-v1.zip).
+This library is **sender only**.
 
 ---
 
@@ -115,18 +117,17 @@ If you change any parameter in one sketch, change it in the other to match.
 
 After both boards are running:
 
-1. The **sender** OLED should show `SENDER` with a live acceleration reading
-   near **1.0 g** at rest, plus battery voltage and power source.
+1. The **sender** OLED should show `SENDER` with `FallRisk: 0%` at rest, plus
+   battery voltage and power source.
 2. The **receiver** OLED should show `RECEIVER / Status: LISTENING`.
-3. Move the sender board quickly — if acceleration exceeds `MOTION_THRESHOLD_G`
-   (1.2 g default), the sender LED turns red and the OLED shows a **5-second
-   countdown**.
+3. Perform a controlled fall motion — after 1.5 s of sustained high-confidence
+   windows the sender LED turns red and the OLED shows a **5-second countdown**.
    - Press the **sender GPIO 2 button** within 5 seconds to cancel — no LoRa
      packet is sent and the OLED shows `CANCELLED`.
    - Let the countdown expire — the `FALL_ALERT` packet is transmitted, the
      sender buzzer sounds, and the OLED shows `FALL ALERT SENT`.
 4. The **receiver** responds with a red LED, repeating buzzer, and OLED alert
-   showing the alert number, RSSI, and SNR.  The alarm continues until the
-   **receiver GPIO 2 button** is pressed.
+   showing the alert number, confidence score, RSSI, and SNR. The alarm
+   continues until the **receiver GPIO 2 button** is pressed.
 5. After acknowledging, the receiver OLED returns to `LISTENING` and the LED
    returns to green.

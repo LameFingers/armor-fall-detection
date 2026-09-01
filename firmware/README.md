@@ -1,66 +1,55 @@
 # Armor Firmware
 
-This folder will contain the embedded firmware that runs on both Armor boards.
+This folder contains the embedded firmware for both ARMOR boards.
 
-## Boards
+---
 
-Both firmware targets run on the **LilyGO LoRa32 915 MHz** development board
-(also sold as TTGO LoRa32 / TTGO Paxcounter). Key on-board hardware used by
-Armor:
+## Sketches
+
+| Sketch | Board | Description |
+|--------|-------|-------------|
+| [`sender_bmi160_lora_alert/sender_bmi160_lora_alert.ino`](sender_bmi160_lora_alert/sender_bmi160_lora_alert.ino) | LILYGO T3 V1.6.1 (wearable) | Reads BMI160 IMU, runs TinyML inference, triggers LoRa alert after cancellation countdown |
+| [`receiver_lora_alert/receiver_lora_alert.ino`](receiver_lora_alert/receiver_lora_alert.ino) | LILYGO T3 V1.6.1 (base station) | Listens for FALL_ALERT packets, sounds repeating alarm, waits for acknowledge button |
+
+---
+
+## Board
+
+Both sketches target the **LILYGO T3 V1.6.1**:
 
 | Feature | Detail |
 |---------|--------|
 | SoC | ESP32 (dual-core Xtensa LX6, 240 MHz) |
-| LoRa radio | SX1276 / SX1278 @ 915 MHz |
-| Display | 0.96-inch I²C OLED |
-| Storage | SD-card slot (not used in v1) |
-| Connectivity | BLE + Wi-Fi (not used in v1) |
-| Battery | 3.7 V LiPo via onboard charging IC |
+| LoRa radio | SX1276 @ 915 MHz (hardwired on PCB) |
+| Display | Built-in SSD1306 128×64 OLED |
+| Battery | 3.7 V LiPo via JST connector |
 
-The external IMU is the **HiLetgo BMI160** (six-axis: 3-axis accelerometer +
-3-axis gyroscope) connected over I²C.
+---
 
-## Firmware targets
+## Required libraries
 
-### 1. Wearable (`firmware/wearable/`)
+Install via **Sketch → Include Library → Manage Libraries** or **Add .ZIP Library**:
 
-Planned responsibilities:
+| Library | Source | Used by |
+|---------|--------|---------|
+| `LoRa` by Sandeep Mistry | Library Manager | Both |
+| `Adafruit GFX Library` | Library Manager | Both |
+| `Adafruit SSD1306` | Library Manager | Both |
+| `DFRobot_BMI160` | Library Manager | Sender only |
+| `armor-fall-detection-binary-v1` | [`ml/armor-fall-detection-binary-v1.zip`](../ml/armor-fall-detection-binary-v1.zip) | Sender only |
 
-- Initialize the BMI160 IMU and configure it for 50 Hz sampling
-- Collect accelerometer and gyroscope data at a consistent rate
-- Prepare fixed-length motion windows for fall-detection logic
-- Run a baseline threshold detector on each window
-- Optionally run a deployed TinyML model as a second-stage classifier
-- Manage the device state machine: idle → possible-fall → alerting →
-  cancelled / confirmed
-- Drive the buzzer and status LED during the alert window
-- Read the cancel button to abort a false alarm
-- Transmit a compact LoRa emergency packet when a fall is confirmed
-- Receive an acknowledgement packet from the base station
+For full setup and upload instructions see [`docs/firmware-setup.md`](../docs/firmware-setup.md).
 
-### 2. Base station (`firmware/base-station/`)
+---
 
-Planned responsibilities:
+## LoRa parameters
 
-- Listen for incoming LoRa packets
-- Validate the packet format and device ID
-- Activate the buzzer and red LED when an alert is received
-- Wait for the operator acknowledgement button press
-- Transmit a LoRa acknowledgement packet back to the wearable
-- Display alert status on the onboard OLED
+Both sketches must use identical radio parameters or packets will not be decoded:
 
-## Planned development environment
-
-- IDE: Arduino IDE or PlatformIO
-- Board package: ESP32 Arduino core (espressif/arduino-esp32)
-- Key libraries (to be confirmed against actual board variant):
-  - `BMI160-Arduino` — IMU driver
-  - `RadioLib` or `arduino-LoRa` — SX1276/SX1278 LoRa driver
-  - `Adafruit SSD1306` + `Adafruit GFX` — OLED display
-- ML deployment (stretch goal): Edge Impulse Arduino library or equivalent
-  exported C++ model
-
-## Current status
-
-Firmware development has not started. Parts have been ordered. Pin assignments
-and library selection will be confirmed once the boards are in hand.
+| Parameter | Value |
+|-----------|-------|
+| Frequency | 915 MHz |
+| Spreading factor | 7 |
+| Signal bandwidth | 125 kHz |
+| Coding rate | 4/5 |
+| TX power (sender) | 17 dBm |

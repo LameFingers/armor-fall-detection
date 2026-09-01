@@ -2,43 +2,67 @@
 
 ## Overview
 
-Armor is an edge-AI wearable safety system designed to identify probable falls
-and request help for remote workers. The system performs motion analysis locally
-on the wearable, provides the wearer an opportunity to cancel a false alarm,
-and sends an emergency notification by LoRa if the wearer does not respond.
+Armor is an edge-AI wearable safety system that detects probable falls and
+alerts a remote observer over LoRa without any internet or smartphone
+dependency. All motion analysis runs locally on the wearable device using a
+trained TinyML classifier.
 
-Both the wearable and the base station run on LilyGO LoRa32 915 MHz boards
-(also marketed as TTGO LoRa32). These boards combine an ESP32 SoC, an
-SX1276/SX1278 LoRa radio, a 0.96-inch OLED display, an SD-card slot, and
-onboard BLE and Wi-Fi (Wi-Fi and BLE are not used in version 1). The wearable
-board reads the HiLetgo BMI160 IMU over I²C. The two boards communicate
-directly over 915 MHz LoRa — there is no commercial LoRaWAN gateway.
+Both the wearable and the base station run on **LILYGO T3 V1.6.1** boards
+(ESP32 + SX1276 LoRa + SSD1306 OLED). The wearable reads a DFRobot Gravity
+BMI160 6-axis IMU over I²C. The two boards communicate directly over
+915 MHz LoRa — there is no LoRaWAN gateway or cloud service.
 
-## Planned information flow
+---
 
-1. The BMI160 IMU measures acceleration and rotational motion.
-2. The wearable LilyGO LoRa32 samples and preprocesses the sensor data.
-3. A baseline threshold detector (and optionally a TinyML model) evaluates the
-   motion window locally on the ESP32.
-4. If a possible fall is detected, Armor activates a local buzzer and LED alert.
-5. The wearer can press the cancel button within the configured window if safe.
-6. If no cancellation occurs within the configured time window, Armor sends a
-   compact emergency packet through the onboard SX1276/SX1278 LoRa radio.
-7. The second LilyGO LoRa32 (base station) receives the packet, activates its
-   buzzer and red LED, and waits for an operator acknowledgement.
+## Information flow
+
+1. The BMI160 IMU samples accelerometer and gyroscope data at **50 Hz**.
+2. The sender firmware maintains a continuously rolling feature buffer of the
+   most recent 2-second window (all 6 axes: ax, ay, az, gx, gy, gz).
+3. Every **500 ms** the Edge Impulse binary classifier runs on the buffer and
+   produces a `fall_like` confidence score (0–1).
+4. If the score exceeds **0.80 for 3 consecutive windows** (1.5 s sustained),
+   the sender enters a **5-second cancellation countdown**.
+5. The wearer can press **GPIO 2** within 5 seconds to suppress the alert.
+6. If the countdown expires without a button press, the sender transmits a
+   compact `FALL_ALERT` LoRa packet and sounds the buzzer.
+7. The receiver listens continuously. On receipt it activates a repeating
+   buzzer alarm and turns its LED red.
+8. An operator presses the **receiver GPIO 2** button to acknowledge and
+   silence the alarm.
+
+---
 
 ## Main subsystems
 
-- Wearable sensing: HiLetgo BMI160 six-axis IMU (accelerometer + gyroscope)
-- Edge processing: LilyGO LoRa32 (ESP32) — wearable unit
-- AI inference: threshold-based detector; TinyML model as stretch goal
-- User feedback: buzzer, status LED, and cancel button on the wearable
-- Communications: direct 915 MHz LoRa link (SX1276/SX1278) between the two boards
-- Base station: second LilyGO LoRa32 with buzzer, red LED, and ack button
-- Power and enclosure: rechargeable 3.7 V LiPo battery, charging circuit, and
-  3D-printed enclosure
+| Subsystem | Implementation |
+|-----------|---------------|
+| IMU sensing | DFRobot Gravity BMI160 (SEN0250), 6-axis, I²C address 0x69 |
+| Edge processing | LILYGO T3 V1.6.1 (ESP32, 240 MHz dual-core) |
+| TinyML inference | Edge Impulse binary classifier — `fall_like` vs `non_fall` |
+| User feedback | KY-006 buzzer, common-anode RGB LED, GPIO 2 cancel button |
+| LoRa communications | SX1276 on-board, 915 MHz, SF7, 125 kHz BW, 4/5 CR |
+| Base station | Second LILYGO T3 V1.6.1 with buzzer, LED, and acknowledge button |
+| Power | PKCELL LP503562 3.7 V LiPo via T3 V1.6.1 JST connector; battery ADC on GPIO 35 |
+| Display | Built-in SSD1306 128×64 OLED on both boards |
 
-## Current status
+---
 
-Planning phase. Hardware has been selected and ordered. Hardware integration,
-data collection, model training, and prototype validation have not yet started.
+## Packet format
+
+```
+FALL_ALERT,<alertNumber>,CONF=<confidence>
+```
+
+Example: `FALL_ALERT,3,CONF=0.94`
+
+Only one packet type is transmitted in this version. The receiver parses the
+alert number and confidence score for display on its OLED.
+
+---
+
+## What is not used in v1
+
+The T3 V1.6.1 includes Wi-Fi, Bluetooth, and an SD-card slot. None of these
+are used in the current firmware. All processing and communication is handled
+locally by the two boards over direct LoRa.
