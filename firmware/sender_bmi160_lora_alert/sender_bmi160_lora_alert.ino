@@ -5,24 +5,22 @@
  * Board: LILYGO T3 V1.6.1 (ESP32 + SX1276 + SSD1306 OLED)
  *
  * Features:
- *   - BMI160 acceleration monitoring and threshold-based motion alerts.
- *   - Five-second cancellation period after a motion event.
+ *   - BMI160 6-axis IMU feeding a TinyML continuous rolling buffer.
+ *   - Edge Impulse binary classification (fall_like vs non_fall).
+ *   - Five-second cancellation period after a fall_like event.
  *   - GPIO 2 button cancels the alert before LoRa transmission.
  *   - LoRa FALL_ALERT transmission and KY-006 buzzer after timeout.
  *   - Estimated LiPo voltage and percentage on the OLED.
  *
  * Alert flow:
- *   1. BMI160 magnitude exceeds MOTION_THRESHOLD_G and cooldown has elapsed.
+ *   1. TinyML fall_like confidence exceeds FALL_LIKE_THRESHOLD for
+ *      REQUIRED_CONSECUTIVE_FALLS inference windows and cooldown has elapsed.
  *   2. LED turns red; OLED shows a 5-second countdown.
  *   3. If the wearer presses GPIO 2 within 5 seconds: alert is cancelled,
  *      no LoRa packet is sent, LED returns green.
  *   4. If the countdown expires without a button press: alertNumber is
  *      incremented, FALL_ALERT packet is transmitted over LoRa, buzzer
  *      sounds, then LED returns green.
- *
- * This design is a baseline threshold detector, NOT a validated fall
- * detector. A single acceleration threshold may cause false positives
- * (e.g. sharp arm movements) and may miss low-acceleration falls.
  *
  * Button wiring:
  *   GPIO 2 ---- pushbutton ---- GND
@@ -32,9 +30,12 @@
  *   PKCELL LP503562: 3.7 V nominal LiPo, 4.2 V full.
  *   T3 V1.6.1 battery-monitor ADC input: GPIO 35.
  *
- * This is a baseline prototype, not a medical/safety-certified device.
+ * This is a prototype, not a medical/safety-certified device.
  * ============================================================
  */
+
+// Edge Impulse TinyML library (name matches your exported Arduino project).
+#include <armor-fall-detection-binary-v1_inferencing.h>
 
 // SPI driver — required for the SX1276 LoRa module via hardware SPI.
 #include <SPI.h>
@@ -48,8 +49,6 @@
 #include <Adafruit_SSD1306.h>
 // DFRobot driver for the Gravity BMI160 (SEN0250) 6-axis IMU.
 #include <DFRobot_BMI160.h>
-// Standard C math — used for sqrt() in magnitude calculation.
-#include <math.h>
 
 // =================================================
 // LILYGO T3 V1.6.1 INTERNAL LORA CONNECTIONS
@@ -88,7 +87,7 @@ Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);
 //
 // Shares the I2C bus with the OLED (GPIO21 SDA, GPIO22 SCL).
 // SA0 left unconnected → default address 0x69.
-// VIN → 3.3V rail, GND → GND rail. All other breakout pins unconnected.
+// VIN → 3.3V rail, GND → GND rail.
 // =================================================
 #define BMI160_ADDR  0x69
 DFRobot_BMI160 bmi160;
@@ -112,7 +111,7 @@ DFRobot_BMI160 bmi160;
 //   KY-006 - / piezo terminal → GPIO 13
 //   KY-006 + pin → unconnected
 //
-// Both pins are driven to opposite logic levels so the full 3.3V swing
+// Both pins are driven to opposite logic levels so the full 3.3 V swing
 // appears across the piezo, improving loudness at low supply voltage.
 // Neither terminal connects directly to GND.
 // =================================================
@@ -137,8 +136,6 @@ DFRobot_BMI160 bmi160;
 // initially estimated as 2.0. Calibrate against a multimeter:
 //   - Displayed voltage too low → increase BATTERY_VOLTAGE_DIVIDER.
 //   - Displayed voltage too high → decrease BATTERY_VOLTAGE_DIVIDER.
-// Voltage readings may dip briefly during LoRa TX or buzzer operation
-// due to supply current draw.
 // =================================================
 #define BATTERY_ADC_PIN  35
 
@@ -147,23 +144,27 @@ const float BATTERY_VOLTAGE_DIVIDER = 2.0;
 const unsigned long BATTERY_UPDATE_MS = 5000;
 
 // =================================================
-// MOTION DETECTION SETTINGS
+// TINYML MOTION DETECTION SETTINGS
 // =================================================
 
-// Acceleration magnitude threshold. At rest the BMI160 reads ~1 g because
-// gravity is always included. 1.2 g is a conservative starting point;
-// calibrate upward using Serial Monitor readings to reduce false positives.
-const float MOTION_THRESHOLD_G = 1.2;
+// Minimum fall_like confidence score (0–1) to count a window as fall-like.
+const float FALL_LIKE_THRESHOLD = 0.8f;
 
-// Duration (ms) the alert LED/display stay shown after transmission.
+// Number of consecutive fall-like inference windows required before an
+// alert is triggered. Reduces false positives from isolated sharp motions.
+const uint8_t REQUIRED_CONSECUTIVE_FALLS = 3;
+
+// How often (ms) the BMI160 is sampled and the rolling buffer is updated.
+const unsigned long SENSOR_UPDATE_MS = 20;
+
+// Minimum time (ms) between successive classifier runs.
+const unsigned long INFERENCE_INTERVAL_MS = 500;
+
+// Duration (ms) the alert/cancelled screen is shown after the sequence ends.
 const unsigned long ALERT_DISPLAY_MS = 2000;
 
 // Minimum time (ms) between successive alert triggers.
-// Prevents repeated alerts from a single sustained high-magnitude event.
 const unsigned long ALERT_COOLDOWN_MS = 5000;
-
-// How often (ms) the sensor is read and the OLED is refreshed.
-const unsigned long SENSOR_UPDATE_MS = 500;
 
 // How long (ms) the wearer has to press the cancel button before the
 // LoRa packet is sent. Shown as a countdown on the OLED.
@@ -176,22 +177,30 @@ const unsigned long BUTTON_DEBOUNCE_MS = 50;
 // Runtime state
 // =================================================
 
-// Tracks the last time the sensor was polled.
-unsigned long lastSensorUpdate = 0;
-// Tracks the last time an alert fired; used for cooldown enforcement.
-unsigned long lastAlertTime = 0;
-// Tracks the last time the battery voltage was sampled.
+unsigned long lastSensorUpdate  = 0;
+unsigned long lastAlertTime     = 0;
 unsigned long lastBatteryUpdate = 0;
 
 // Sequential alert number included in every transmitted FALL_ALERT packet.
 // Only incremented when the countdown expires and the packet is actually sent.
 uint32_t alertNumber = 0;
 
-// Most recent battery reading; updated by updateBatteryStatus().
-float batteryVoltage = 0.0;
-uint8_t batteryPercent = 0;
+float batteryVoltage    = 0.0;
+uint8_t batteryPercent  = 0;
 // True when USB serial is active (used as a USB-power presence estimate).
 bool usbPowerPresent = false;
+
+// Count of consecutive inference windows that scored above the threshold.
+uint8_t consecutiveFallWindows = 0;
+
+// =================================================
+// TinyML rolling buffer state
+// =================================================
+
+float featureBuffer[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE] = {0};
+unsigned long lastInferenceTime = 0;
+bool bufferFilled = false;
+int sampleCount   = 0;
 
 // =================================================
 // LED helpers
@@ -227,16 +236,14 @@ float readBatteryVoltage() {
   }
 
   float adcAverage = total / (float)SAMPLE_COUNT;
-
-  // With ADC_11db attenuation, ESP32 ADC maps roughly 0–3.3 V
-  // into the 0–4095 raw conversion range.
+  // With ADC_11db attenuation, ESP32 ADC maps roughly 0–3.3 V into 0–4095.
   float adcVoltage = (adcAverage / 4095.0) * 3.3;
-
   return adcVoltage * BATTERY_VOLTAGE_DIVIDER;
 }
 
-// Approximate LiPo state of charge derived from voltage.
-// Load from LoRa transmission/buzzer can make this temporarily read lower.
+// Approximate LiPo state of charge derived from open-circuit voltage.
+// Readings may dip briefly during LoRa TX or buzzer operation due to
+// supply current draw.
 uint8_t batteryVoltageToPercent(float voltage) {
   if (voltage >= 4.20) return 100;
   if (voltage >= 4.15) return 95;
@@ -257,8 +264,8 @@ uint8_t batteryVoltageToPercent(float voltage) {
 }
 
 // Re-samples battery voltage and USB-presence flag at BATTERY_UPDATE_MS
-// intervals. Skips the first call guard (batteryVoltage == 0.0) so that
-// an initial reading is taken at setup() before the first loop() cycle.
+// intervals. The batteryVoltage == 0.0 guard lets setup() force an immediate
+// first reading before the first loop() cycle.
 void updateBatteryStatus() {
   if (batteryVoltage > 0.0 &&
       millis() - lastBatteryUpdate < BATTERY_UPDATE_MS) {
@@ -266,32 +273,19 @@ void updateBatteryStatus() {
   }
 
   lastBatteryUpdate = millis();
-  batteryVoltage = readBatteryVoltage();
-  batteryPercent = batteryVoltageToPercent(batteryVoltage);
-
-  /*
-   * USB-present estimate:
-   * On many ESP32 Arduino configurations, Serial is true while USB serial
-   * is connected. This does NOT directly measure charging current.
-   *
-   * Therefore OLED says "USB POWER" rather than "CHARGING."
-   */
+  batteryVoltage  = readBatteryVoltage();
+  batteryPercent  = batteryVoltageToPercent(batteryVoltage);
+  // Serial is truthy while USB serial is active; used as a proxy for USB power.
   usbPowerPresent = Serial;
-
-  Serial.print("Battery: ");
-  Serial.print(batteryVoltage, 2);
-  Serial.print(" V, ");
-  Serial.print(batteryPercent);
-  Serial.println("%");
 }
 
 // =================================================
 // OLED functions
 // =================================================
 
-// Normal monitoring screen: live acceleration, threshold, battery, and
-// power source. Updated every SENSOR_UPDATE_MS.
-void showMonitoring(float accelerationMagnitude) {
+// Normal monitoring screen: live fall-like confidence, threshold, battery,
+// and power source. Updated every INFERENCE_INTERVAL_MS.
+void showMonitoring(float confidence) {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
@@ -301,11 +295,11 @@ void showMonitoring(float accelerationMagnitude) {
 
   display.setTextSize(1);
   display.setCursor(0, 20);
-  display.print("Acc: ");
-  display.print(accelerationMagnitude, 2);
-  display.print("g  T:");
-  display.print(MOTION_THRESHOLD_G, 1);
-  display.println("g");
+  display.print("FallRisk:");
+  display.print(confidence * 100, 0);
+  display.print("% T:");
+  display.print(FALL_LIKE_THRESHOLD * 100, 0);
+  display.println("%");
 
   display.setCursor(0, 33);
   display.print("Bat: ");
@@ -326,7 +320,7 @@ void showMonitoring(float accelerationMagnitude) {
 
 // Post-transmission screen: shown for ALERT_DISPLAY_MS after the LoRa
 // packet has been sent and the buzzer has sounded.
-void showAlert(float accelerationMagnitude) {
+void showAlert(float confidence) {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
@@ -337,18 +331,17 @@ void showAlert(float accelerationMagnitude) {
   display.setTextSize(1);
   display.setCursor(0, 23);
   display.println("FALL ALERT SENT");
-  display.print("Impact: ");
-  display.print(accelerationMagnitude, 2);
-  display.println(" g");
+  display.print("Conf: ");
+  display.print(confidence * 100, 0);
+  display.println("%");
   display.print("Alert #");
   display.println(alertNumber);
+
   display.display();
 }
 
 // Cancel countdown screen: updated each second during the 5-second window.
-// Shows the magnitude that triggered the alert and the seconds remaining.
-void showCancelCountdown(float accelerationMagnitude,
-                         uint8_t secondsRemaining) {
+void showCancelCountdown(float confidence, uint8_t secondsRemaining) {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
@@ -370,7 +363,7 @@ void showCancelCountdown(float accelerationMagnitude,
 }
 
 // Confirmation screen: shown briefly when the wearer cancels in time.
-void showAlertCancelled(float accelerationMagnitude) {
+void showAlertCancelled(float confidence) {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
@@ -381,9 +374,9 @@ void showAlertCancelled(float accelerationMagnitude) {
   display.setTextSize(1);
   display.setCursor(0, 27);
   display.println("Alert was not sent");
-  display.print("Impact: ");
-  display.print(accelerationMagnitude, 2);
-  display.println(" g");
+  display.print("Conf: ");
+  display.print(confidence * 100, 0);
+  display.println("%");
 
   display.display();
 }
@@ -409,7 +402,7 @@ void showError(const char *message1, const char *message2) {
 // Buzzer functions
 //
 // Differential drive: BUZZER_A and BUZZER_B are toggled to opposite levels
-// so the full 3.3V swing appears across the passive piezo element.
+// so the full 3.3 V swing appears across the passive piezo element.
 // =================================================
 
 // Generates a square wave of frequencyHz for durationMs using busy-wait.
@@ -445,13 +438,13 @@ void buzzerAlarm() {
 // =================================================
 // LoRa transmission
 //
-// Packet format: "FALL_ALERT,<alertNumber>,MAG=<magnitude>"
-// Example:       "FALL_ALERT,3,MAG=1.87"
+// Packet format: "FALL_ALERT,<alertNumber>,CONF=<confidence>"
+// Example:       "FALL_ALERT,3,CONF=0.94"
 // Only transmitted after the cancel countdown expires without a button press.
 // =================================================
-void sendFallAlert(float accelerationMagnitude) {
+void sendFallAlert(float confidence) {
   String message = "FALL_ALERT," + String(alertNumber) +
-                   ",MAG=" + String(accelerationMagnitude, 2);
+                   ",CONF=" + String(confidence, 2);
 
   LoRa.beginPacket();
   LoRa.print(message);
@@ -469,24 +462,23 @@ void sendFallAlert(float accelerationMagnitude) {
 // Returns true if the button was pressed (alert cancelled).
 // Returns false if the countdown expired (proceed with transmission).
 // =================================================
-bool waitForCancelButton(float accelerationMagnitude) {
-  unsigned long countdownStart = millis();
-
-  bool lastRawButtonReading = digitalRead(CANCEL_BUTTON_PIN);
-  bool stableButtonState = lastRawButtonReading;
+bool waitForCancelButton(float confidence) {
+  unsigned long countdownStart   = millis();
+  bool lastRawButtonReading      = digitalRead(CANCEL_BUTTON_PIN);
+  bool stableButtonState         = lastRawButtonReading;
   unsigned long lastDebounceTime = millis();
 
   // Track seconds shown to avoid redundant OLED refreshes.
   uint8_t previouslyShownSeconds = 255;
 
   while (millis() - countdownStart < CANCEL_COUNTDOWN_MS) {
-    unsigned long elapsedMs = millis() - countdownStart;
+    unsigned long elapsedMs   = millis() - countdownStart;
     unsigned long remainingMs = CANCEL_COUNTDOWN_MS - elapsedMs;
     // Ceiling division: show "1 sec" until the very last millisecond.
-    uint8_t secondsRemaining = (remainingMs + 999) / 1000;
+    uint8_t secondsRemaining  = (remainingMs + 999) / 1000;
 
     if (secondsRemaining != previouslyShownSeconds) {
-      showCancelCountdown(accelerationMagnitude, secondsRemaining);
+      showCancelCountdown(confidence, secondsRemaining);
       previouslyShownSeconds = secondsRemaining;
     }
 
@@ -506,8 +498,7 @@ bool waitForCancelButton(float accelerationMagnitude) {
     if (stableButtonState == LOW) {
       Serial.println(">>> Alert cancelled by GPIO2 button.");
 
-      // Wait for release to avoid immediately detecting a held button
-      // on the next event.
+      // Wait for release to avoid immediately re-detecting a held button.
       while (digitalRead(CANCEL_BUTTON_PIN) == LOW) {
         delay(10);
       }
@@ -524,7 +515,9 @@ bool waitForCancelButton(float accelerationMagnitude) {
 // =================================================
 // Alert sequence
 //
-// Called when magnitude >= MOTION_THRESHOLD_G and cooldown has elapsed.
+// Called when consecutiveFallWindows reaches REQUIRED_CONSECUTIVE_FALLS
+// and the cooldown has elapsed.
+//
 // Sequence:
 //   1. Start cooldown timer (prevents re-triggering during countdown).
 //   2. Turn LED red.
@@ -532,35 +525,39 @@ bool waitForCancelButton(float accelerationMagnitude) {
 //      → Cancelled: show CANCELLED screen, return to green/monitoring.
 //      → Expired:   increment alertNumber, transmit FALL_ALERT, sound buzzer,
 //                   show alert screen, return to green/monitoring.
+// In both paths the rolling buffer is cleared so stale data does not
+// immediately re-trigger an alert after the cooldown period.
 // =================================================
-void triggerAlert(float accelerationMagnitude) {
-  // Start cooldown even if the wearer cancels the event. This avoids
-  // repeated countdowns from one sustained acceleration reading.
+void triggerAlert(float confidence) {
+  // Start cooldown even if cancelled — prevents repeated countdowns from
+  // one sustained high-confidence sequence.
   lastAlertTime = millis();
-
   ledRed();
 
-  // No LoRa packet and no buzzer occur unless this times out.
-  if (waitForCancelButton(accelerationMagnitude)) {
-    showAlertCancelled(accelerationMagnitude);
+  if (waitForCancelButton(confidence)) {
+    showAlertCancelled(confidence);
     delay(ALERT_DISPLAY_MS);
-
     ledGreen();
-    showMonitoring(accelerationMagnitude);
+    showMonitoring(confidence);
+
+    memset(featureBuffer, 0, sizeof(featureBuffer));
+    sampleCount   = 0;
+    bufferFilled  = false;
     return;
   }
 
-  // Countdown ended without cancellation: send the emergency message.
   alertNumber++;
-
-  showAlert(accelerationMagnitude);
-  sendFallAlert(accelerationMagnitude);
+  showAlert(confidence);
+  sendFallAlert(confidence);
   buzzerAlarm();
 
   delay(ALERT_DISPLAY_MS);
-
   ledGreen();
-  showMonitoring(accelerationMagnitude);
+  showMonitoring(confidence);
+
+  memset(featureBuffer, 0, sizeof(featureBuffer));
+  sampleCount   = 0;
+  bufferFilled  = false;
 }
 
 // =================================================
@@ -604,10 +601,7 @@ void setup() {
   // Initialize the built-in OLED. Halts if not found.
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println("OLED failed.");
-
-    while (true) {
-      delay(1000);
-    }
+    while (true) delay(1000);
   }
 
   // Show startup message while BMI160 initializes.
@@ -622,10 +616,7 @@ void setup() {
   if (bmi160.I2cInit(BMI160_ADDR) != BMI160_OK) {
     Serial.println("BMI160 failed at address 0x69.");
     showError("BMI160 not found", "Check VIN/GND/SDA/SCL.");
-
-    while (true) {
-      delay(1000);
-    }
+    while (true) delay(1000);
   }
 
   Serial.println("BMI160 initialized at I2C address 0x69.");
@@ -637,10 +628,7 @@ void setup() {
   if (!LoRa.begin(LORA_BAND)) {
     Serial.println("LoRa failed.");
     showError("LoRa failed", "Check antenna/band.");
-
-    while (true) {
-      delay(1000);
-    }
+    while (true) delay(1000);
   }
 
   // Radio parameters — must match receiver exactly.
@@ -653,28 +641,29 @@ void setup() {
   updateBatteryStatus();
 
   Serial.println("Sender is ready.");
-  Serial.println("Columns: GX GY GZ (raw) | AX AY AZ (g) | MAG (g)");
-
-  showMonitoring(1.0);
+  showMonitoring(0.0);
 }
 
 // =================================================
-// loop() — runs continuously after setup()
+// loop() — TinyML continuous inference
+//
+// Every SENSOR_UPDATE_MS:
+//   1. Read BMI160 accelerometer and gyroscope.
+//   2. Shift the rolling feature buffer and append the new 6-axis sample.
+//   3. After SENSOR_UPDATE_MS * 100 warm-up samples, run the classifier
+//      every INFERENCE_INTERVAL_MS.
+//   4. If fall_like confidence exceeds the threshold for
+//      REQUIRED_CONSECUTIVE_FALLS consecutive windows, trigger the alert.
 // =================================================
 void loop() {
-  // Rate-limit sensor reads to SENSOR_UPDATE_MS. Returns early if the
-  // interval has not elapsed yet; triggerAlert() will block this guard
-  // during the countdown window, which is the intended behavior.
   if (millis() - lastSensorUpdate < SENSOR_UPDATE_MS) {
     return;
   }
-
   lastSensorUpdate = millis();
 
-  // Six-element array to receive gyro and accelerometer raw data.
+  // Six-element array: [0..2] = gyro X/Y/Z, [3..5] = accel X/Y/Z.
   int16_t sensorData[6] = {0};
 
-  // Skip this cycle on I2C read error.
   if (bmi160.getAccelGyroData(sensorData) != BMI160_OK) {
     Serial.println("BMI160 read error.");
     return;
@@ -692,38 +681,73 @@ void loop() {
   float ay = sensorData[4] / 16384.0;
   float az = sensorData[5] / 16384.0;
 
-  // Total acceleration magnitude: sqrt(ax² + ay² + az²).
-  // At rest this is ~1 g because gravity is always in the measurement.
-  // Values significantly above 1 g indicate dynamic motion.
-  float magnitudeG = sqrt(ax * ax + ay * ay + az * az);
+  // Shift the rolling buffer left by one 6-axis sample and append the new one.
+  for (int i = 0; i < EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE - 6; i++) {
+    featureBuffer[i] = featureBuffer[i + 6];
+  }
 
-  Serial.print("Gyro raw: X=");
-  Serial.print(gx);
-  Serial.print(" Y=");
-  Serial.print(gy);
-  Serial.print(" Z=");
-  Serial.print(gz);
+  int lastIndex = EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE - 6;
+  featureBuffer[lastIndex + 0] = ax;
+  featureBuffer[lastIndex + 1] = ay;
+  featureBuffer[lastIndex + 2] = az;
+  featureBuffer[lastIndex + 3] = gx;
+  featureBuffer[lastIndex + 4] = gy;
+  featureBuffer[lastIndex + 5] = gz;
 
-  Serial.print(" | Accel g: X=");
-  Serial.print(ax, 3);
-  Serial.print(" Y=");
-  Serial.print(ay, 3);
-  Serial.print(" Z=");
-  Serial.print(az, 3);
+  // Warm-up: discard the first 100 samples so the buffer is fully populated
+  // before any inference is attempted.
+  if (sampleCount < 100) {
+    sampleCount++;
+    return;
+  }
 
-  Serial.print(" | Magnitude=");
-  Serial.print(magnitudeG, 3);
-  Serial.println(" g");
+  bufferFilled = true;
 
-  // Re-sample battery voltage on its own slower interval.
+  if (millis() - lastInferenceTime < INFERENCE_INTERVAL_MS) {
+    return;
+  }
+  lastInferenceTime = millis();
+
+  signal_t features_signal;
+  int err = numpy::signal_from_buffer(
+      featureBuffer, EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE, &features_signal);
+
+  ei_impulse_result_t result = {0};
+  err = run_classifier(&features_signal, &result, false);
+
+  if (err != EI_IMPULSE_OK) {
+    Serial.print("ERR: Failed to run classifier, code: ");
+    Serial.println(err);
+    return;
+  }
+
+  float fallScore = 0.0;
+  for (uint16_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+    if (strcmp(result.classification[i].label, "fall_like") == 0) {
+      fallScore = result.classification[i].value;
+    }
+  }
+
+  Serial.print("Fall: ");
+  Serial.print(fallScore, 2);
+
   updateBatteryStatus();
-  showMonitoring(magnitudeG);
+  showMonitoring(fallScore);
 
-  // Suppress consecutive alerts from one sustained high-magnitude event.
-  bool cooldownFinished =
-      (millis() - lastAlertTime >= ALERT_COOLDOWN_MS);
+  bool cooldownFinished = (millis() - lastAlertTime >= ALERT_COOLDOWN_MS);
 
-  if (magnitudeG >= MOTION_THRESHOLD_G && cooldownFinished) {
-    triggerAlert(magnitudeG);
+  if (fallScore >= FALL_LIKE_THRESHOLD) {
+    consecutiveFallWindows++;
+  } else {
+    consecutiveFallWindows = 0;
+  }
+
+  Serial.print(" FallWindows: ");
+  Serial.println(consecutiveFallWindows);
+
+  if (cooldownFinished && consecutiveFallWindows >= REQUIRED_CONSECUTIVE_FALLS) {
+    Serial.println(">>> CONFIRMED FALL-LIKE EVENT");
+    consecutiveFallWindows = 0;
+    triggerAlert(fallScore);
   }
 }

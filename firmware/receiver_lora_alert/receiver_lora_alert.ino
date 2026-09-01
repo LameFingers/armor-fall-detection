@@ -80,7 +80,7 @@ Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);
 // =================================================
 // EXTERNAL COMMON-ANODE RGB LED
 //
-// Common anode (long leg) -> 3.3V.
+// Common anode (long leg) → 3.3V.
 // Each cathode connects through a 220–330 Ω resistor to its GPIO pin.
 // LOW = color ON (anode higher than cathode); HIGH = color OFF.
 // =================================================
@@ -91,15 +91,15 @@ Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);
 // =================================================
 // KY-006 PASSIVE BUZZER — SINGLE-PIN PWM DRIVE
 //
-// Previous version used a differential two-GPIO drive (both BUZZER_A and
-// BUZZER_B toggled opposite). This version uses ESP32 hardware PWM (LEDC)
-// on BUZZER_A (GPIO 12) for a clean square wave. BUZZER_B (GPIO 13) is
-// held permanently LOW as the piezo return path.
+// Previous sender version used a differential two-GPIO drive (both BUZZER_A
+// and BUZZER_B toggled opposite). This receiver uses ESP32 hardware PWM
+// (LEDC) on BUZZER_A (GPIO 12) for a clean square wave. BUZZER_B (GPIO 13)
+// is held permanently LOW as the piezo return path.
 //
 // Wiring:
-//   KY-006 S / piezo terminal -> GPIO 12  (PWM output)
-//   KY-006 - / piezo terminal -> GPIO 13  (held LOW)
-//   KY-006 + pin -> unconnected
+//   KY-006 S / piezo terminal → GPIO 12  (PWM output)
+//   KY-006 - / piezo terminal → GPIO 13  (held LOW)
+//   KY-006 + pin → unconnected
 // =================================================
 #define BUZZER_A   12
 #define BUZZER_B   13
@@ -128,8 +128,8 @@ const unsigned long BUTTON_DEBOUNCE_MS = 50;
 const uint16_t ALARM_TONE_1_HZ = 1900;
 const uint16_t ALARM_TONE_2_HZ = 2300;
 
-const unsigned long ALARM_TONE_1_MS = 180;
-const unsigned long ALARM_TONE_2_MS = 180;
+const unsigned long ALARM_TONE_1_MS  = 180;
+const unsigned long ALARM_TONE_2_MS  = 180;
 const unsigned long ALARM_SILENCE_MS = 400;
 
 // 8-bit PWM resolution: duty cycle 128 / 255 ≈ 50% square wave.
@@ -144,18 +144,18 @@ bool alarmActive = false;
 
 // Counts all received packets (any type) and validated FALL_ALERT packets.
 uint32_t receivedPacketCount = 0;
-uint32_t receivedAlertCount = 0;
+uint32_t receivedAlertCount  = 0;
 
 // Stores the most recently received FALL_ALERT data for OLED display.
-String latestMessage = "";
-int latestAlertNumber = -1;
-float latestMagnitude = 0.0;
-int latestRssi = 0;
-float latestSnr = 0.0;
+String latestMessage      = "";
+int latestAlertNumber     = -1;
+float latestConfidence    = 0.0;
+int latestRssi            = 0;
+float latestSnr           = 0.0;
 
 // Button debounce state variables.
-bool lastRawButtonReading = HIGH;
-bool stableButtonState = HIGH;
+bool lastRawButtonReading  = HIGH;
+bool stableButtonState     = HIGH;
 unsigned long lastDebounceTime = 0;
 
 // =================================================
@@ -171,7 +171,7 @@ enum AlarmTonePhase {
   ALARM_SILENCE
 };
 
-AlarmTonePhase alarmTonePhase = ALARM_TONE_1;
+AlarmTonePhase alarmTonePhase    = ALARM_TONE_1;
 unsigned long alarmPhaseStartTime = 0;
 
 // =================================================
@@ -238,7 +238,7 @@ void showListening() {
   display.display();
 }
 
-// Active alarm screen: shows alert number, RSSI, SNR, and ACK prompt.
+// Active alarm screen: shows alert number, confidence, RSSI, SNR, and ACK prompt.
 // RSSI (dBm): less negative = stronger signal.
 // SNR (dB): positive = signal above noise floor.
 void showActiveAlert() {
@@ -256,12 +256,14 @@ void showActiveAlert() {
   display.print("Alert #: ");
   display.println(latestAlertNumber);
 
-  display.print("RSSI: ");
-  display.print(latestRssi);
-  display.print(" SNR:");
-  display.println(latestSnr, 1);
+  display.print("Conf: ");
+  display.print(latestConfidence * 100, 0);
+  display.print("%  RSSI:");
+  display.println(latestRssi);
 
-  display.print("Alerts RX: ");
+  display.print("SNR: ");
+  display.print(latestSnr, 1);
+  display.print(" dB  RX:");
   display.println(receivedAlertCount);
 
   // Bottom-row prompt reminds the operator which button to press.
@@ -284,6 +286,7 @@ void showAcknowledged() {
   display.setCursor(0, 28);
   display.println("Alarm silenced");
   display.println("Returning to listen...");
+
   display.display();
 }
 
@@ -309,10 +312,10 @@ void showLoRaError() {
 // Packet parsing
 //
 // Sender packet format:
-//   FALL_ALERT,<alertNumber>,MAG=<magnitude>
+//   FALL_ALERT,<alertNumber>,CONF=<confidence>
 //
 // Example:
-//   FALL_ALERT,7,MAG=2.31
+//   FALL_ALERT,7,CONF=0.94
 // =================================================
 
 // Extracts the sequential alert number from the packet string.
@@ -330,23 +333,21 @@ int parseAlertNumber(const String &message) {
     return -1;
   }
 
-  String alertNumberText =
-      message.substring(prefix.length(), secondCommaIndex);
-
+  String alertNumberText = message.substring(prefix.length(), secondCommaIndex);
   return alertNumberText.toInt();
 }
 
-// Extracts the acceleration magnitude (in g) from the "MAG=" field.
+// Extracts the fall_like confidence score (0–1) from the "CONF=" field.
 // Returns 0.0 if the field is not found.
-float parseMagnitude(const String &message) {
-  int magnitudeIndex = message.indexOf("MAG=");
+float parseConfidence(const String &message) {
+  int confidenceIndex = message.indexOf("CONF=");
 
-  if (magnitudeIndex == -1) {
+  if (confidenceIndex == -1) {
     return 0.0;
   }
 
-  String magnitudeText = message.substring(magnitudeIndex + 4);
-  return magnitudeText.toFloat();
+  String confidenceText = message.substring(confidenceIndex + 5);
+  return confidenceText.toFloat();
 }
 
 // =================================================
@@ -358,7 +359,7 @@ float parseMagnitude(const String &message) {
 void startAlarm() {
   alarmActive = true;
 
-  alarmTonePhase = ALARM_TONE_1;
+  alarmTonePhase     = ALARM_TONE_1;
   alarmPhaseStartTime = millis();
 
   ledRed();
@@ -383,13 +384,13 @@ void updateAlarmBuzzer() {
     return;
   }
 
-  unsigned long now = millis();
+  unsigned long now          = millis();
   unsigned long phaseElapsed = now - alarmPhaseStartTime;
 
   switch (alarmTonePhase) {
     case ALARM_TONE_1:
       if (phaseElapsed >= ALARM_TONE_1_MS) {
-        alarmTonePhase = ALARM_TONE_2;
+        alarmTonePhase      = ALARM_TONE_2;
         alarmPhaseStartTime = now;
         buzzerStart(ALARM_TONE_2_HZ);
       }
@@ -397,7 +398,7 @@ void updateAlarmBuzzer() {
 
     case ALARM_TONE_2:
       if (phaseElapsed >= ALARM_TONE_2_MS) {
-        alarmTonePhase = ALARM_SILENCE;
+        alarmTonePhase      = ALARM_SILENCE;
         alarmPhaseStartTime = now;
         buzzerStop();
       }
@@ -405,7 +406,7 @@ void updateAlarmBuzzer() {
 
     case ALARM_SILENCE:
       if (phaseElapsed >= ALARM_SILENCE_MS) {
-        alarmTonePhase = ALARM_TONE_1;
+        alarmTonePhase      = ALARM_TONE_1;
         alarmPhaseStartTime = now;
         buzzerStart(ALARM_TONE_1_HZ);
       }
@@ -446,10 +447,8 @@ bool acknowledgeButtonPressed() {
 // =================================================
 
 // Called when a packet starting with "FALL_ALERT," is received.
-// Parses the alert number and magnitude, increments the alert counter,
+// Parses the alert number and confidence score, increments the alert counter,
 // and either starts a new alarm or refreshes the OLED if already active.
-// A single acceleration threshold may cause false positives;
-// this system is not a validated fall detector.
 void handleFallAlert(const String &message, int rssi, float snr) {
   int receivedAlertNumber = parseAlertNumber(message);
 
@@ -458,18 +457,21 @@ void handleFallAlert(const String &message, int rssi, float snr) {
     return;
   }
 
-  latestMessage = message;
-  latestAlertNumber = receivedAlertNumber;
-  latestMagnitude = parseMagnitude(message);
-  latestRssi = rssi;
-  latestSnr = snr;
+  latestMessage      = message;
+  latestAlertNumber  = receivedAlertNumber;
+  latestConfidence   = parseConfidence(message);
+  latestRssi         = rssi;
+  latestSnr          = snr;
 
-  // Every valid FALL_ALERT increases the received alert count.
   receivedAlertCount++;
 
   Serial.print(">>> FALL_ALERT #");
   Serial.print(latestAlertNumber);
-  Serial.println(" received.");
+  Serial.print(" received. Conf=");
+  Serial.print(latestConfidence, 2);
+  Serial.print(" RSSI=");
+  Serial.print(latestRssi);
+  Serial.println(" dBm");
 
   // Only initialize the repeating buzzer sequence on the first packet
   // that activates an alarm. Additional alerts just refresh the OLED.
@@ -477,7 +479,7 @@ void handleFallAlert(const String &message, int rssi, float snr) {
     startAlarm();
   } else {
     // Alarm is already running; keep the LED red and refresh the display
-    // with the updated alert number, RSSI, and SNR.
+    // with the updated alert number, confidence, RSSI, and SNR.
     ledRed();
   }
 
@@ -504,8 +506,8 @@ void checkLoRaPackets() {
     message += (char)LoRa.read();
   }
 
-  int rssi = LoRa.packetRssi();
-  float snr = LoRa.packetSnr();
+  int rssi   = LoRa.packetRssi();
+  float snr  = LoRa.packetSnr();
 
   receivedPacketCount++;
 
@@ -564,10 +566,7 @@ void setup() {
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
     Serial.println("OLED initialization failed.");
-
-    while (true) {
-      delay(1000);
-    }
+    while (true) delay(1000);
   }
 
   // Show startup message while LoRa initializes.
@@ -585,14 +584,10 @@ void setup() {
   if (!LoRa.begin(LORA_BAND)) {
     Serial.println("LoRa initialization failed.");
     showLoRaError();
-
-    while (true) {
-      delay(1000);
-    }
+    while (true) delay(1000);
   }
 
   // Radio parameters — must match sender exactly for packets to be decoded.
-  // Must match sender settings exactly.
   LoRa.setSpreadingFactor(7);
   LoRa.setSignalBandwidth(125E3);
   LoRa.setCodingRate4(5);
@@ -616,13 +611,9 @@ void setup() {
 // inputs simultaneously during an active alarm.
 // =================================================
 void loop() {
-  // This runs during both normal listening and an active alarm.
   checkLoRaPackets();
-
-  // Drives the repeated buzzer sequence without delay().
   updateAlarmBuzzer();
 
-  // Acknowledge only works during an active alarm.
   if (alarmActive && acknowledgeButtonPressed()) {
     stopAlarm();
     showAcknowledged();

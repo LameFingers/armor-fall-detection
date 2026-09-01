@@ -18,7 +18,6 @@ All IBM Bob suggestions are reviewed, adapted, and tested before use.
 
 ## Entry 001 — Hardware specification correction and documentation update
 
-**Date:** 2026
 **Objective:** Correct all project documentation to reflect the actual hardware
 on hand and align the repository with the real bill of materials before any
 firmware or ML work begins.
@@ -67,7 +66,6 @@ hardware arrives.
 
 ## Entry 002 — Working firmware, wiring documentation, and baseline motion detection
 
-**Date:** July 15, 2026
 **Objective:** Add physically tested sender and receiver firmware to the
 repository and create a full set of supporting documentation covering
 hardware wiring, firmware setup, motion detection methodology, and
@@ -130,7 +128,6 @@ development priorities.
 
 ## Entry 003 — Button design consultation: sender cancel and receiver acknowledge
 
-**Date:** July 15, 2026
 **Objective:** Determine how many tactile buttons to add to the sender and
 receiver boards, and what each button should do.
 
@@ -172,7 +169,6 @@ actual implementation (see Entry 004). No files were modified in this session.
 
 ## Entry 004 — Button implementation, receiver LEDC buzzer, and battery monitoring
 
-**Date:** July 19, 2026
 **Objective:** Update both firmware files to match physically tested code that
 adds cancel/acknowledge buttons, a non-blocking repeating receiver alarm, and
 LiPo battery voltage monitoring on the sender.
@@ -238,4 +234,64 @@ Firmware and documentation accepted pending review of VS Code diff.
 - Updated `docs/baseline-motion-detection.md`
 - Updated `hardware/README.md`
 - Updated `README.md`
+- This log entry (`docs/bob-development-log.md`)
+
+---
+
+## Entry 005 — TinyML integration, firmware finalisation, and testing documentation
+
+**Objective:** Replace the threshold-based motion detector with a trained Edge
+Impulse TinyML model, finalise both firmware files for the GitHub repository,
+update the testing-validation document to reflect the completed data-collection
+and labelling sessions, and add this log entry.
+
+**Prompt given to Bob:**
+> Provided the final TinyML sender firmware incorporating the Edge Impulse
+> binary classifier (fall_like vs non_fall), a 6-axis rolling feature buffer,
+> consecutive-window confirmation logic, and an updated OLED layout. Instructed
+> Bob to fix the firmware, clean out empty structures, and make everything look
+> polished for the final GitHub state. Then provided descriptions of the actual
+> training activities and instructed Bob to update the testing-validation
+> document and add a development log entry with dates removed from all entries.
+
+**Bob's contribution:**
+Bob finalised both firmware files and rewrote the testing-validation document:
+
+| File | Action | Description |
+|------|--------|-------------|
+| `firmware/sender_bmi160_lora_alert/sender_bmi160_lora_alert.ino` | Updated | Replaced threshold-based detection with Edge Impulse TinyML pipeline; updated header, constants, state variables, OLED labels, packet format (MAG= → CONF=), and loop() inference logic; removed stale baseline comments |
+| `firmware/receiver_lora_alert/receiver_lora_alert.ino` | Updated | Updated packet parser from MAG= to CONF=; renamed magnitude variable to confidence; updated showActiveAlert() to display confidence percentage; removed stale baseline-detector comments |
+| `docs/testing-validation.md` | Updated | Replaced planning stub with documented training activities, fall categories, non-fall categories, and validation methodology |
+| `docs/bob-development-log.md` | Updated | Removed date lines from all entries; added this entry |
+
+**Key firmware changes documented:**
+
+*Sender:*
+- Added `#include <armor-fall-detection-binary-v1_inferencing.h>` for the
+  Edge Impulse exported library.
+- Rolling 6-axis feature buffer (`featureBuffer[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]`)
+  updated at 20 ms intervals; buffer filled after 100 warm-up samples.
+- Classifier runs every 500 ms via `run_classifier()`; `fall_like` label score
+  extracted from `result.classification[]`.
+- `FALL_LIKE_THRESHOLD = 0.8` and `REQUIRED_CONSECUTIVE_FALLS = 3` gate alerts
+  to require sustained high-confidence windows before triggering.
+- `consecutiveFallWindows` counter reset on any sub-threshold window, on entry
+  to `triggerAlert()`, and on buffer clear after an alert.
+- LoRa packet field changed from `,MAG=` to `,CONF=` to reflect the confidence
+  score payload.
+- OLED monitoring screen updated: `Acc: Xg T:Xg` → `FallRisk:X% T:X%`.
+
+*Receiver:*
+- `parseMagnitude()` → `parseConfidence()`; searches for `CONF=` (5-char prefix).
+- `latestMagnitude` → `latestConfidence`; displayed as a percentage on the
+  active-alert OLED screen alongside RSSI and SNR.
+- Serial log on packet receipt now prints confidence score and RSSI.
+
+**Project owner decision:**
+Firmware and documentation accepted. Repository is in final state for submission.
+
+**Artifacts produced:**
+- Updated `firmware/sender_bmi160_lora_alert/sender_bmi160_lora_alert.ino`
+- Updated `firmware/receiver_lora_alert/receiver_lora_alert.ino`
+- Updated `docs/testing-validation.md`
 - This log entry (`docs/bob-development-log.md`)
