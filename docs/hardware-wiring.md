@@ -86,9 +86,9 @@ it OFF**.
 | LED leg                | Connect to                                      |
 |------------------------|-------------------------------------------------|
 | Common anode (long leg) | 3.3 V                                          |
-| Red cathode            | GPIO 14 → 220–330 Ω resistor → GPIO 14         |
-| Green cathode          | GPIO 25 → 220–330 Ω resistor → GPIO 25         |
-| Blue cathode           | GPIO 4  → 220–330 Ω resistor → GPIO 4          |
+| Red cathode            | LED pin → 220–330 Ω resistor → GPIO 14         |
+| Green cathode          | LED pin → 220–330 Ω resistor → GPIO 25         |
+| Blue cathode           | LED pin → 220–330 Ω resistor → GPIO 4          |
 
 > Use a separate 220–330 ohm resistor for each color cathode.  A single
 > shared resistor will cause incorrect brightness and color mixing.

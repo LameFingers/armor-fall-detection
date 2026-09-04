@@ -1,8 +1,8 @@
-# Armor
+# ARMOR
 
 ## Edge-AI Fall Detection and Long-Range Emergency Alerting for Remote Workers
 
-Armor is a wearable safety system being developed for farmers and other people
+ARMOR is a wearable safety system being developed for farmers and other people
 who work alone in remote areas. It aims to detect potential falls locally using
 motion sensors and TinyML, then send an emergency alert through LoRa when the
 wearer cannot respond.
@@ -16,9 +16,9 @@ personal motion data to the cloud.
 
 ## Proposed solution
 
-Armor will use a BMI160 motion sensor and a LilyGO LoRa32 (TTGO) development
+ARMOR will use a BMI160 motion sensor and a LilyGO LoRa32 (TTGO) development
 board to analyze motion data directly on the wearable device. When a possible
-fall is detected, Armor will alert the wearer with a buzzer and LED and allow
+fall is detected, ARMOR will alert the wearer with a buzzer and LED and allow
 time to cancel a false alarm. If there is no response, the device will send an
 emergency message over LoRa to a second LilyGO LoRa32 base station.
 
@@ -89,14 +89,11 @@ Impulse TinyML classifier running on-device.
 trained over six iterations, validated on-device, and deployed to the sender
 firmware. The trained model library is committed to this repository.
 
-## IBM Bob usage
-
-IBM Bob is being used as the primary AI development partner for system planning,
-architecture, code development, test design, debugging, and project
-documentation. Development evidence will be maintained in
-[`docs/bob-development-log.md`](docs/bob-development-log.md).
-
 ## Safety note
 
-Armor is an early-stage prototype and is not certified medical equipment or a
+ARMOR is an early-stage prototype and is not certified medical equipment or a
 replacement for emergency services.
+
+## License
+
+This project is released under the [MIT License](LICENSE).

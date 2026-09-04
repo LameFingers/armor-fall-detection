@@ -1,4 +1,4 @@
-# Armor Firmware
+# ARMOR Firmware
 
 This folder contains the embedded firmware for both ARMOR boards.
 
