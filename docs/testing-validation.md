@@ -127,6 +127,11 @@ rate on `non_fall` was introduced as a tradeoff but is mitigated on-device by
 the `REQUIRED_CONSECUTIVE_FALLS = 3` confirmation gate, which requires three
 consecutive high-confidence windows before any alert fires.
 
+Screenshots of the final model configuration inside Edge Impulse Studio are in
+[`evidence/ml-training/`](../evidence/ml-training/) — covering the dataset
+split, impulse design, spectral feature DSP parameters, and the classifier
+architecture and results page.
+
 ---
 
 ## On-device validation
