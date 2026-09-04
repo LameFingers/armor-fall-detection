@@ -9,7 +9,7 @@ classifier.
 
 | File | Description |
 |------|-------------|
-| `armor-fall-detection-binary-v1.zip` | Edge Impulse Arduino library export — the trained and quantized (int8) binary classifier ready to install in the Arduino IDE |
+| [`armor-fall-detection-binary-v1.zip`](armor-fall-detection-binary-v1.zip) | Edge Impulse Arduino library export — the trained and quantized (int8) binary classifier ready to install in the Arduino IDE |
 
 ---
 
@@ -17,7 +17,7 @@ classifier.
 
 1. Open the Arduino IDE.
 2. Go to **Sketch → Include Library → Add .ZIP Library…**
-3. Select `armor-fall-detection-binary-v1.zip` from this folder.
+3. Select [`armor-fall-detection-binary-v1.zip`](armor-fall-detection-binary-v1.zip) from this folder.
 4. The library will be available as:
 
 ```cpp
@@ -78,5 +78,5 @@ To retrain or update the model:
 1. Log into [Edge Impulse](https://studio.edgeimpulse.com) and open the ARMOR project.
 2. Add new samples, adjust the impulse, or tune the architecture.
 3. Export a new Arduino library (`.zip`).
-4. Replace `armor-fall-detection-binary-v1.zip` in this folder.
+4. Replace [`armor-fall-detection-binary-v1.zip`](armor-fall-detection-binary-v1.zip) in this folder.
 5. Re-install the library in the Arduino IDE and re-flash the sender.

@@ -77,7 +77,7 @@ Impulse TinyML classifier running on-device.
 | [`docs/firmware-setup.md`](docs/firmware-setup.md) | Arduino IDE setup, library installation, and upload instructions |
 | [`docs/testing-validation.md`](docs/testing-validation.md) | Training activities, iterative model results, and final validation metrics |
 | [`hardware/README.md`](hardware/README.md) | Bill of materials for the prototype |
-| [`evidence/`](evidence/) | Wiring photos, OLED screenshots, Serial Monitor captures, and test data |
+| [`ml/README.md`](ml/README.md) | ML model details, install instructions, and training history |
 
 ---
 
