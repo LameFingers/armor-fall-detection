@@ -77,7 +77,9 @@ Impulse TinyML classifier running on-device.
 | [`docs/firmware-setup.md`](docs/firmware-setup.md) | Arduino IDE setup, library installation, and upload instructions |
 | [`docs/testing-validation.md`](docs/testing-validation.md) | Training activities, iterative model results, and final validation metrics |
 | [`hardware/README.md`](hardware/README.md) | Bill of materials for the prototype |
-| [`ml/README.md`](ml/README.md) | ML model details, install instructions, and training history |
+| [`evidence/hardware/`](evidence/hardware/) | Breadboard build photos and close-up shots of both boards |
+| [`evidence/ml-training/`](evidence/ml-training/) | Edge Impulse screenshots for all six training attempts |
+| [`evidence/on-device/`](evidence/on-device/) | On-device validation test result screenshots |
 
 ---
 

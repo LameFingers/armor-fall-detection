@@ -97,9 +97,9 @@ hardware.
 | 5 | 2 | Dense 20 → 10 | 92.31% | 0.88 | Re-collected sitting data; false positives resolved |
 | **6** | **2** | **Dense 64 → 32 → Dropout 0.3** | **91.0%** | **0.91** | **Expanded architecture; fall_like recall 79% → 88.4%; final deployed model** |
 
-Full per-attempt confusion matrices and Edge Impulse screenshots are in
-`evidence/ml-screenshots/`. Full model configuration details are in
-[`ml/README.md`](../ml/README.md).
+Full per-attempt Edge Impulse screenshots are in
+[`evidence/ml-training/`](../evidence/ml-training/). Full model configuration
+details are in [`ml/README.md`](../ml/README.md).
 
 ---
 
@@ -140,6 +140,9 @@ consecutive high-confidence windows before any alert fires.
 | LoRa transmission and packet receipt | Validated on-device (sender → receiver) |
 | OLED display and alert sequence | Validated on-device |
 | Battery monitoring accuracy | Validated against multimeter reading |
+
+Screenshots from the first and final on-device validation runs are in
+[`evidence/on-device/`](../evidence/on-device/).
 
 ---
 

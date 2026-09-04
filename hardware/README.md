@@ -46,5 +46,5 @@ GPIO pin assignments and breadboard wiring instructions.
 ## Current status
 
 Both boards are assembled on breadboards and the TinyML firmware has been
-physically tested end-to-end. Wiring photographs are stored in
-[`evidence/`](../evidence/).
+physically tested end-to-end. Wiring photographs and close-up shots are stored in
+[`evidence/hardware/`](../evidence/hardware/).
